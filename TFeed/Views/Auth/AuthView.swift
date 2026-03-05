@@ -148,6 +148,16 @@ struct AuthView: View {
                     .padding(.top, 16)
             }
 
+            if viewModel.canResendCode {
+                Button("Code not received?") {
+                    viewModel.reportCodeMissing()
+                    viewModel.resendCode()
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.top, 8)
+            }
+
             Spacer()
 
             actionButton("Continue") {

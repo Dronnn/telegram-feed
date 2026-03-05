@@ -10,6 +10,8 @@ extension File: @retroactive @unchecked Sendable {}
 extension FormattedText: @retroactive @unchecked Sendable {}
 extension TextEntity: @retroactive @unchecked Sendable {}
 extension TextEntityType: @retroactive @unchecked Sendable {}
+extension ResendCodeReason: @retroactive @unchecked Sendable {}
+extension ResendCodeReasonVerificationFailed: @retroactive @unchecked Sendable {}
 
 actor TDLibService {
     static let shared = TDLibService()
@@ -101,11 +103,18 @@ actor TDLibService {
         print("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
     }
 
-    func resendAuthenticationCode() async throws {
+    func resendAuthenticationCode(reason: ResendCodeReason = .resendCodeReasonUserRequest) async throws {
         guard let client else { return }
-        print("[TDLib Auth] Resending authentication code")
-        _ = try await client.resendAuthenticationCode(reason: .resendCodeReasonUserRequest)
+        print("[TDLib Auth] Resending authentication code, reason: \(reason)")
+        _ = try await client.resendAuthenticationCode(reason: reason)
         print("[TDLib Auth] resendAuthenticationCode succeeded")
+    }
+
+    func reportAuthenticationCodeMissing() async throws {
+        guard let client else { return }
+        print("[TDLib Auth] Reporting authentication code missing")
+        try await client.reportAuthenticationCodeMissing(mobileNetworkCode: nil)
+        print("[TDLib Auth] reportAuthenticationCodeMissing succeeded")
     }
 
     func sendCode(_ code: String) async throws {
