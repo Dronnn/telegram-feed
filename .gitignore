@@ -1,5 +1,9 @@
 
 
+# Development docs and logs
+docs/
+logs/
+
 # Xcode
 build/
 DerivedData/
