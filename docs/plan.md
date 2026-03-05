@@ -622,14 +622,14 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] Persist selected channel IDs в SwiftData (`SelectedChannel` @Model)
 
 ### Фаза 7: Polish и GitHub
-- [ ] Liquid Glass materials на карточках, toolbar, FAB
-- [ ] Пустые состояния (нет каналов, нет сообщений)
-- [ ] Обработка ошибок сети (no connection state)
-- [ ] Light/dark mode тестирование
-- [ ] README.md: описание, скриншоты, build instructions, лицензия
-- [ ] `.gitignore` (credentials, build artifacts)
-- [ ] Memory profiling (большие ленты, много медиа)
-- [ ] Scroll position persistence across app kill
+- [x] Liquid Glass materials на карточках, toolbar, FAB
+- [x] Пустые состояния (нет каналов, нет сообщений)
+- [x] Обработка ошибок сети (no connection state)
+- [x] Light/dark mode тестирование
+- [x] README.md: описание, скриншоты, build instructions, лицензия
+- [x] `.gitignore` (credentials, build artifacts)
+- [x] Memory profiling (большие ленты, много медиа)
+- [x] Scroll position persistence across app kill
 
 ---
 

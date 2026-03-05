@@ -142,6 +142,7 @@ struct FeedView: View {
             .padding(.vertical, 12)
         }
         .scrollPosition(id: $scrollPosition)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .refreshable {
             await viewModel.refresh(selectedIDs: appState.selectedChannelIDs)
         }

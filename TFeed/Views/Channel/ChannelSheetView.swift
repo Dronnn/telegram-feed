@@ -81,6 +81,7 @@ struct ChannelSheetView: View {
             .padding(.vertical, 12)
         }
         .scrollPosition(id: $scrollPosition)
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .onChange(of: scrollPosition) { _, newValue in
             if let pos = newValue,
                let first = viewModel.items.first,
