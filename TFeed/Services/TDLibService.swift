@@ -6,6 +6,7 @@ extension TDLibClient: @retroactive @unchecked Sendable {}
 extension TDLibClientManager: @retroactive @unchecked Sendable {}
 extension Chat: @retroactive @unchecked Sendable {}
 extension Message: @retroactive @unchecked Sendable {}
+extension File: @retroactive @unchecked Sendable {}
 
 actor TDLibService {
     static let shared = TDLibService()

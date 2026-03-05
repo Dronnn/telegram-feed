@@ -136,7 +136,7 @@ final class FeedViewModel {
         let channel = channels[message.chatId]
         let text = extractText(from: message.content)
         let reactions = extractReactions(from: message.interactionInfo)
-        let hasMedia = checkHasMedia(message.content)
+        let mediaInfo = message.content.extractMediaInfo()
 
         return FeedItem(
             chatId: message.chatId,
@@ -146,7 +146,8 @@ final class FeedViewModel {
             channelTitle: channel?.title ?? "",
             avatarFileId: channel?.avatarFileId,
             reactions: reactions,
-            hasMedia: hasMedia
+            hasMedia: mediaInfo != nil,
+            mediaInfo: mediaInfo
         )
     }
 
@@ -183,12 +184,4 @@ final class FeedViewModel {
         }
     }
 
-    private func checkHasMedia(_ content: MessageContent) -> Bool {
-        switch content {
-        case .messagePhoto, .messageVideo, .messageAnimation, .messageVoiceNote, .messageAudio, .messageDocument:
-            return true
-        default:
-            return false
-        }
-    }
 }

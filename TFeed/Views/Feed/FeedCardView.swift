@@ -43,16 +43,9 @@ struct FeedCardView: View {
                     .foregroundStyle(Color(.label))
             }
 
-            // Media placeholder
-            if item.hasMedia {
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(height: 200)
-                    .overlay {
-                        Image(systemName: "photo")
-                            .font(.title)
-                            .foregroundStyle(.secondary)
-                    }
+            // Media
+            if let mediaInfo = item.mediaInfo {
+                MediaContentView(mediaInfo: mediaInfo)
             }
 
             // Reactions
