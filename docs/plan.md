@@ -609,10 +609,10 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] `FullscreenMediaView` — fullscreen для фото/видео/GIF
 
 ### Фаза 5: Текст, реакции, UX
-- [ ] `FormattedTextView` — bold, italic, links, code, spoilers
-- [ ] `ReactionsBarView` — капсулы emoji + count, glass material
-- [ ] Счётчик непрочитанных + FAB «вниз»
-- [ ] Сохранение/восстановление scroll position
+- [x] `FormattedTextView` — bold, italic, links, code, spoilers
+- [x] `ReactionsBarView` — капсулы emoji + count, glass material
+- [x] Счётчик непрочитанных + FAB «вниз»
+- [x] Сохранение/восстановление scroll position
 
 ### Фаза 6: Канал и настройки
 - [ ] `ChannelViewModel` + `ChannelSheetView` — single channel view
