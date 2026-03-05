@@ -54,3 +54,15 @@ starting task execution phase
 [26-03-05 22:00:38] off.
 [26-03-05 22:02:05] All 7 items in Фаза 2 verified as properly implemented. The project builds successfully. Now marking the checkboxes and committing.
 [26-03-05 22:02:15] Now update the progress log and commit.
+
+--- task iteration 3 ---
+[26-03-05 22:09:30] TASK PICKUP: Фаза 4 - Медиа (Media)
+[26-03-05 22:09:30] All 6 items verified as already fully implemented:
+[26-03-05 22:09:30]   1. TdImageView - progressive loading: minithumbnail (blurred) -> full-size image, with download and caching
+[26-03-05 22:09:30]   2. MediaContentView - complete routing for photo, video, animation/GIF, voice note, audio; fullscreen cover support
+[26-03-05 22:09:30]   3. VideoPlayerView - thumbnail + play overlay + duration badge -> AVPlayer after download
+[26-03-05 22:09:30]   4. GIF/animation auto-play via AnimationInlineView with looping notification observer, muted
+[26-03-05 22:09:30]   5. AudioPlayerView - waveform visualization (5-bit decoding, 32-bar display), play/pause, progress tracking
+[26-03-05 22:09:30]   6. FullscreenMediaView - drag-to-dismiss, pinch-to-zoom, supports photo/video/animation
+[26-03-05 22:09:30] Build: SUCCEEDED on iOS 26.2 simulator. All checkboxes marked [x].
+[26-03-05 22:09:30] Remaining: Фаза 5-7, Phase 1 Implementation Checklist, Auth Hotfix Plan.

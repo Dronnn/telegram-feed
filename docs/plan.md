@@ -601,12 +601,12 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] Подписка на `updateNewMessage` для real-time
 
 ### Фаза 4: Медиа
-- [ ] `TdImageView` — minithumbnail -> thumbnail -> full-size pipeline
-- [ ] `MediaContentView` — роутинг по типу медиа
-- [ ] Inline видео (thumbnail + play overlay -> AVPlayer)
-- [ ] GIF/animation auto-play
-- [ ] `AudioPlayerView` — waveform + play/pause для голосовых
-- [ ] `FullscreenMediaView` — fullscreen для фото/видео/GIF
+- [x] `TdImageView` — minithumbnail -> thumbnail -> full-size pipeline
+- [x] `MediaContentView` — роутинг по типу медиа
+- [x] Inline видео (thumbnail + play overlay -> AVPlayer)
+- [x] GIF/animation auto-play
+- [x] `AudioPlayerView` — waveform + play/pause для голосовых
+- [x] `FullscreenMediaView` — fullscreen для фото/видео/GIF
 
 ### Фаза 5: Текст, реакции, UX
 - [ ] `FormattedTextView` — bold, italic, links, code, spoilers
