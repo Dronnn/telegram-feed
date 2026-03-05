@@ -1,11 +1,15 @@
 import SwiftUI
+import SwiftData
 
 struct FeedView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.modelContext) private var modelContext
     @State private var viewModel = FeedViewModel()
     @State private var scrollPosition: FeedItemID?
     @State private var showSettings = false
+    @State private var selectedChannel: ChannelInfo?
+    @State private var selectedMessageId: FeedItemID?
 
     var body: some View {
         NavigationStack {
@@ -30,7 +34,7 @@ struct FeedView: View {
             }
         }
         .task {
-            // Restore saved scroll position
+            loadSelectedChannelsFromSwiftData()
             let savedPosition = ScrollPositionStore.load()
             await viewModel.load(selectedIDs: appState.selectedChannelIDs)
             viewModel.startListening()
@@ -45,6 +49,24 @@ struct FeedView: View {
             if newPhase == .background, let position = scrollPosition {
                 ScrollPositionStore.save(position)
             }
+        }
+        .onChange(of: appState.selectedChannelIDs) { _, newIDs in
+            Task {
+                await viewModel.load(selectedIDs: newIDs)
+            }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(channels: viewModel.channels)
+        }
+        .sheet(item: $selectedChannel) { channel in
+            ChannelSheetView(channelInfo: channel, scrollTo: selectedMessageId)
+        }
+    }
+
+    private func loadSelectedChannelsFromSwiftData() {
+        let descriptor = FetchDescriptor<SelectedChannel>()
+        if let saved = try? modelContext.fetch(descriptor), !saved.isEmpty {
+            appState.selectedChannelIDs = Set(saved.map(\.chatId))
         }
     }
 
@@ -78,8 +100,13 @@ struct FeedView: View {
                 }
 
                 ForEach(viewModel.items) { item in
-                    FeedCardView(item: item)
-                        .padding(.horizontal, 16)
+                    FeedCardView(item: item) {
+                        if let channel = viewModel.channels[item.chatId] {
+                            selectedMessageId = item.id
+                            selectedChannel = channel
+                        }
+                    }
+                    .padding(.horizontal, 16)
                 }
             }
             .padding(.vertical, 12)

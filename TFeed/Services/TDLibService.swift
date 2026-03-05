@@ -104,4 +104,19 @@ actor TDLibService {
         guard let client else { return }
         try await client.logOut()
     }
+
+    func optimizeStorage() async throws {
+        guard let client else { return }
+        _ = try await client.optimizeStorage(
+            chatIds: [],
+            chatLimit: 0,
+            count: 0,
+            excludeChatIds: [],
+            fileTypes: nil,
+            immunityDelay: 0,
+            returnDeletedFileStatistics: false,
+            size: 0,
+            ttl: 0
+        )
+    }
 }

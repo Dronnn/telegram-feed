@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 @main
 struct TFeedApp: App {
@@ -9,5 +10,6 @@ struct TFeedApp: App {
             RootView()
                 .environment(appState)
         }
+        .modelContainer(for: SelectedChannel.self)
     }
 }
