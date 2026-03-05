@@ -6,7 +6,9 @@ import TDLibKit
 final class ChannelViewModel {
     var items: [FeedItem] = []
     var isLoading = false
-    var isLoadingMore = false
+    var isLoadingOlder = false
+    var isLoadingNewer = false
+    var hasReachedNewest = false
 
     let channelInfo: ChannelInfo
 
@@ -14,24 +16,35 @@ final class ChannelViewModel {
         self.channelInfo = channelInfo
     }
 
-    func load() async {
+    func load(aroundMessageId: Int64? = nil) async {
         guard !isLoading else { return }
         isLoading = true
         defer { isLoading = false }
 
         do {
-            let messages = try await TDLibService.shared.getChatHistory(
-                chatId: channelInfo.id,
-                limit: 30
-            )
+            let messages: [Message]
+            if let aroundMessageId {
+                messages = try await TDLibService.shared.getChatHistory(
+                    chatId: channelInfo.id,
+                    fromMessageId: aroundMessageId,
+                    limit: 30,
+                    offset: -15
+                )
+            } else {
+                messages = try await TDLibService.shared.getChatHistory(
+                    chatId: channelInfo.id,
+                    limit: 30
+                )
+                hasReachedNewest = true
+            }
             items = messages.map { makeItem(from: $0) }.sorted()
         } catch { print("[TFeed] Error: \(error)") }
     }
 
     func loadOlder() async {
-        guard !isLoadingMore, let oldest = items.first else { return }
-        isLoadingMore = true
-        defer { isLoadingMore = false }
+        guard !isLoadingOlder, let oldest = items.first else { return }
+        isLoadingOlder = true
+        defer { isLoadingOlder = false }
 
         do {
             let messages = try await TDLibService.shared.getChatHistory(
@@ -42,6 +55,28 @@ final class ChannelViewModel {
             let existingIDs = Set(items.map(\.id))
             let newItems = messages.map { makeItem(from: $0) }.filter { !existingIDs.contains($0.id) }
             if !newItems.isEmpty {
+                items = (items + newItems).sorted()
+            }
+        } catch { print("[TFeed] Error: \(error)") }
+    }
+
+    func loadNewer() async {
+        guard !isLoadingNewer, let newest = items.last else { return }
+        isLoadingNewer = true
+        defer { isLoadingNewer = false }
+
+        do {
+            let messages = try await TDLibService.shared.getChatHistory(
+                chatId: channelInfo.id,
+                fromMessageId: newest.messageId,
+                limit: 20,
+                offset: -20
+            )
+            let existingIDs = Set(items.map(\.id))
+            let newItems = messages.map { makeItem(from: $0) }.filter { !existingIDs.contains($0.id) }
+            if newItems.isEmpty {
+                hasReachedNewest = true
+            } else {
                 items = (items + newItems).sorted()
             }
         } catch { print("[TFeed] Error: \(error)") }

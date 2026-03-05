@@ -46,10 +46,12 @@ struct ChannelSheetView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task {
-            await viewModel.load()
+            await viewModel.load(aroundMessageId: initialMessageId?.messageId)
             if let initialMessageId,
                viewModel.items.contains(where: { $0.id == initialMessageId }) {
                 scrollPosition = initialMessageId
+            } else if let last = viewModel.items.last {
+                scrollPosition = last.id
             }
         }
     }
@@ -68,7 +70,7 @@ struct ChannelSheetView: View {
     private var messageList: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 12) {
-                if viewModel.isLoadingMore {
+                if viewModel.isLoadingOlder {
                     ProgressView()
                         .padding()
                 }
@@ -77,18 +79,23 @@ struct ChannelSheetView: View {
                     channelCard(item: item)
                         .padding(.horizontal, 16)
                 }
+
+                if viewModel.isLoadingNewer {
+                    ProgressView()
+                        .padding()
+                }
             }
             .padding(.vertical, 12)
         }
         .scrollPosition(id: $scrollPosition)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .onChange(of: scrollPosition) { _, newValue in
-            if let pos = newValue,
-               let first = viewModel.items.first,
-               pos == first.id {
-                Task {
-                    await viewModel.loadOlder()
-                }
+            guard let pos = newValue else { return }
+            if let first = viewModel.items.first, pos == first.id {
+                Task { await viewModel.loadOlder() }
+            }
+            if let last = viewModel.items.last, pos == last.id, !viewModel.hasReachedNewest {
+                Task { await viewModel.loadNewer() }
             }
         }
     }

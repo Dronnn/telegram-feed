@@ -1,0 +1,143 @@
+# Ralphex Progress Log
+Plan: /Users/andreasmaier/Library/Mobile Documents/com~apple~CloudDocs/Developing/learning projects/telegram-feed/docs/plan-v3.md
+Branch: plan-v2
+Mode: full
+Started: 2026-03-05 23:07:30
+------------------------------------------------------------
+
+starting task execution phase
+
+--- task iteration 1 ---
+[26-03-05 23:07:52] I'll work on Bug 1: Adding an empty state in SettingsView for an empty channel list.
+[26-03-05 23:07:52] When a user has no channel subscriptions, the Settings screen's Channels section is blank with no explanation. This task adds a "You have no channels" message
+[26-03-05 23:07:52] so users understand why nothing is displayed.
+[26-03-05 23:07:52] Key files involved: SettingsView (the SwiftUI view for settings), and potentially the view model providing channel data.
+[26-03-05 23:07:52] Let me delegate the implementation to a sub-agent.
+[26-03-05 23:08:31] Good. The `channelsSection` in SettingsView iterates over `viewModel.filteredChannels` but shows nothing when the list is empty. I need to add a simple empty
+[26-03-05 23:08:31] state there. The codebase uses custom empty states (not ContentUnavailableView).
+[26-03-05 23:08:40] Now let me build the project to validate.
+[26-03-05 23:08:50] Build failed in TDLibService.swift, not in my changes. Let me check if this is a pre-existing issue.
+[26-03-05 23:08:59] This is a pre-existing issue in TDLibService.swift (already modified on this branch). Let me fix it.
+[26-03-05 23:09:42] TDLibKit defines its own `Error` struct, which shadows Swift's `Error` protocol. The fix is to use `Swift.Error` explicitly.
+[26-03-05 23:10:02] The case name is `noClient` in the extension but `clientNotInitialized` in the enum. Let me check if there's also a diff for this file.
+[26-03-05 23:10:16] The enum uses `clientNotInitialized` but the extension file uses `noClient`. I'll align them by updating the extension file.
+[26-03-05 23:10:51] Build succeeded. Now let me update the plan and commit.
+[26-03-05 23:11:01] I'll commit only the files relevant to this bug fix (SettingsView, plan-v3, and the pre-existing TDLibService build fixes that were blocking the build).
+[26-03-05 23:11:12] Committed. Now let me check remaining checkboxes.
+[26-03-05 23:11:24] Bug 1 is done. 6 remaining unchecked items (Bugs 2-7). Stopping here for the external loop to handle the next task.
+[26-03-05 23:11:24] Summary of what was done:
+[26-03-05 23:11:24]   - Added empty state in SettingsView's Channels section: shows "You have no channel subscriptions yet" when the list is empty, or "No channels matching your
+[26-03-05 23:11:24] search" when a search yields no results
+[26-03-05 23:11:24]   - Fixed pre-existing build errors: TDLibServiceError enum needed `Swift.Error` instead of `Error` (TDLibKit shadows the protocol), and aligned `.noClient` ->
+[26-03-05 23:11:24] `.clientNotInitialized` across extension files
+
+--- task iteration 2 ---
+[26-03-05 23:11:43] TASK: Bug 2 - Add pull-to-refresh to the Channels section in SettingsView
+[26-03-05 23:11:43] This task adds pull-to-refresh functionality to the Channels list in Settings so that when a user subscribes to a new channel in Telegram, they can pull down
+[26-03-05 23:11:43] to refresh and see the new channel without restarting the app. Key files involved will be the SettingsView and the ChannelManager/TDLib service layer that
+[26-03-05 23:11:43] fetches the channel list.
+[26-03-05 23:11:43] Let me explore the codebase to understand the current implementation.
+[26-03-05 23:12:20] Now let me read the actual files I need to modify.
+[26-03-05 23:12:36] Let me also see how FeedView presents SettingsView.
+[26-03-05 23:12:53] Now I have a clear picture. The approach:
+[26-03-05 23:12:53]   1. Add a `refreshChannels()` method to SettingsViewModel that loads channels directly from TDLib
+[26-03-05 23:12:53]   2. Add `.refreshable` modifier to the List in SettingsView
+[26-03-05 23:12:53] Let me delegate the implementation.
+[26-03-05 23:13:09] Now I need to add the `TDLibKit` import to SettingsViewModel since it uses `Chat` type, and add `.refreshable` to the List.
+[26-03-05 23:13:20] Now let me build to validate.
+[26-03-05 23:13:29] Build succeeded. Now let me update the plan and commit.
+[26-03-05 23:13:54] Bug 2 is done. Remaining unchecked items in the plan:
+[26-03-05 23:13:54]   - Bug 3: Feed refresh on returning from Settings with scroll position preservation
+[26-03-05 23:13:54]   - Bug 4: Post link opens ChannelSheet scrolled to message
+[26-03-05 23:13:54]   - Bug 5: ChannelSheet full channel feed with infinite scroll
+[26-03-05 23:13:54]   - Bug 6: Load 30 messages per channel + infinite upward scroll
+[26-03-05 23:13:54]   - Bug 7: Real-time new messages via updateNewMessage
+[26-03-05 23:13:54] More [ ] checkboxes remain in other sections. Stopping here for the loop to handle the next task.
+
+--- task iteration 3 ---
+[26-03-05 23:14:18] The first unchecked item is Bug 3: Feed refresh when returning from Settings while preserving scroll position.
+[26-03-05 23:14:18] This task will:
+[26-03-05 23:14:18]   - Make the feed automatically refresh when the user returns from Settings after toggling channels
+[26-03-05 23:14:18]   - Preserve scroll position so the user stays at the same message
+[26-03-05 23:14:18]   - Remove messages from disabled channels and add messages from newly enabled channels without jumping the scroll
+[26-03-05 23:14:18] Key components: FeedView/FeedViewModel (feed loading/display), SettingsView (channel selection), AppState (shared state for communicating changes).
+[26-03-05 23:14:18] Let me explore the codebase to understand the current architecture.
+[26-03-05 23:15:25] Now let me read the key files I need to modify.
+[26-03-05 23:17:11] Now I have a clear picture. The problem is that `FeedView.onChange(of: appState.selectedChannelIDs)` calls `viewModel.load()` which does a full reload
+[26-03-05 23:17:11] (re-fetching all chats and messages), replacing the entire items array and losing scroll position. Also, the `guard !isLoading` in `load()` silently drops
+[26-03-05 23:17:11] concurrent calls.
+[26-03-05 23:17:11] The fix: create an incremental `applyChannelChanges` method that only removes/adds items for changed channels, preserving existing items and scroll position.
+[26-03-05 23:17:52] Let me verify the edits were applied correctly.
+[26-03-05 23:17:57] Both edits look correct. Now let me build to validate.
+[26-03-05 23:18:08] I'll detect the project type and build it.
+[26-03-05 23:19:28] No iPhone 16 simulator available. Let me use iPhone 16 Pro instead.
+[26-03-05 23:19:36] Build succeeded with no errors. Let me check for any lint configuration.
+[26-03-05 23:19:43] Build is clean, no linter configured.
+[26-03-05 23:19:43] Fixes applied:
+[26-03-05 23:19:43]   - FeedViewModel.swift line 107: Added `applyChannelChanges(newIDs:)` - incremental method that removes items from deselected channels and loads messages only
+[26-03-05 23:19:43] for newly selected channels
+[26-03-05 23:19:43]   - FeedView.swift line 55: Replaced full `load()` call with `applyChannelChanges()` plus scroll position preservation logic
+[26-03-05 23:19:43] Final build status: clean
+[26-03-05 23:19:43] Final lint status: no linter configured
+[26-03-05 23:19:48] Build passes. Now let me update the plan, log progress, and commit.
+[26-03-05 23:19:58] Now commit all changes.
+[26-03-05 23:20:04] I see there are changes from previous iterations that are also unstaged. Let me only commit the files relevant to Bug 3.
+[26-03-05 23:20:19] Committed. Now let me check remaining checkboxes.
+[26-03-05 23:20:27] Bug 3 is done. 4 remaining unchecked items (Bugs 4-7). Stopping here for the external loop to handle the next task.
+[26-03-05 23:20:27] Summary of what was done:
+[26-03-05 23:20:27]   - Added `applyChannelChanges(newIDs:)` to FeedViewModel -- incremental method that fetches channel info for unknown IDs, removes items from deselected
+[26-03-05 23:20:27] channels, loads messages only for newly selected channels, and updates activeChannelIDs
+[26-03-05 23:20:27]   - Updated FeedView's `.onChange(of: appState.selectedChannelIDs)` to use the new incremental method instead of full `load()`, with scroll position
+[26-03-05 23:20:27] preservation that finds the nearest surviving item when the current position is removed
+
+--- task iteration 4 ---
+[26-03-05 23:20:54] TASK: Bug 4 - Post link at end of card opens ChannelSheet scrolled to message
+[26-03-05 23:20:54] This task will make the post link (e.g., "rozetka/44777") at the end of each feed card functional. When tapped, it should open a ChannelSheetView from the
+[26-03-05 23:20:54] bottom, scrolled to that specific message - instead of trying to open an external Telegram link.
+[26-03-05 23:20:54] Key components involved:
+[26-03-05 23:20:54]   - FeedView / message card views (where the link is rendered)
+[26-03-05 23:20:54]   - ChannelSheetView (the sheet that shows a channel's messages)
+[26-03-05 23:20:54]   - TDLib message/channel models
+[26-03-05 23:20:54] Let me explore the codebase first.
+[26-03-05 23:21:56] The agent didn't find a post link being added by the app. Let me look more carefully at the card views.
+[26-03-05 23:22:24] Let me look at the FeedItem model and check if there's any post link concept.
+[26-03-05 23:23:32] Let me look at the ChannelSheetView and FeedViewModel to understand the full data flow.
+[26-03-05 23:28:42] Now I have a full understanding of the codebase. The bug is about t.me links within message card text content (from Telegram channels) not working when
+[26-03-05 23:28:42] tapped. The fix: intercept t.me links in FormattedTextView and open ChannelSheetView instead of trying to open externally.
+[26-03-05 23:28:42] Let me delegate the implementation.
+[26-03-05 23:30:57] Let me verify the changes and build the project.
+[26-03-05 23:31:05] Changes look correct. Let me build the project to validate.
+[26-03-05 23:31:15] Build succeeded. Now let me update the plan and commit.
+[26-03-05 23:31:31] Diff looks clean. Let me commit only the Bug 4 related files.
+[26-03-05 23:31:42] Bug 4 is committed. There are 3 remaining unchecked items in the plan (Bugs 5, 6, 7). Stopping here for the loop to handle the next section.
+
+--- task iteration 5 ---
+[26-03-05 23:32:10] TASK: Bug 5 - ChannelSheet: load all channel messages, scroll to target message, infinite scroll
+[26-03-05 23:32:10] This task will fix the ChannelSheetView which currently shows only 1 message and doesn't scroll to the message the user tapped from. The fix will:
+[26-03-05 23:32:10]   - Load the full message history for the channel (not just 1 message)
+[26-03-05 23:32:10]   - Scroll to the specific message the user navigated from
+[26-03-05 23:32:10]   - Add infinite scroll up (older messages) and down (newer messages)
+[26-03-05 23:32:10] Key files: ChannelSheetView, ChannelSheetViewModel (or equivalent), TDLib message fetching logic.
+[26-03-05 23:32:10] Let me explore the codebase to understand the current implementation.
+[26-03-05 23:32:52] Good analysis. Let me read the key files and implement the fix.
+[26-03-05 23:32:58] Let me also check the FeedView to see how ChannelSheetView is opened and understand FeedItem/FeedItemID types.
+[26-03-05 23:33:27] Now I have a full understanding. Let me implement the fix. The plan:
+[26-03-05 23:33:27]   1. Add `load(aroundMessageId:)` to ChannelViewModel to load messages centered on the target
+[26-03-05 23:33:27]   2. Add `loadNewer()` for infinite scroll downward
+[26-03-05 23:33:27]   3. Update ChannelSheetView to use these when `initialMessageId` is provided, and trigger loadNewer on scroll
+[26-03-05 23:35:10] Let me verify the changes and build.
+[26-03-05 23:35:29] The code looks good but has a minor issue: both top and bottom ProgressViews share `isLoadingMore`, so both show simultaneously. Let me fix this with separate
+[26-03-05 23:35:29] flags.
+[26-03-05 23:35:43] Now update the ChannelSheetView to use separate flags.
+[26-03-05 23:35:50] Now I also need to check if FeedViewModel uses `isLoadingMore` and if changing to `isLoadingOlder` in ChannelViewModel would break anything. Let me check.
+[26-03-05 23:35:53] Good - `isLoadingMore` in FeedViewModel is separate from ChannelViewModel. No cross-references. Now let me build.
+[26-03-05 23:36:02] Build succeeded. Now let me update the plan and commit.
+[26-03-05 23:36:14] Now update the progress log.
+[26-03-05 23:36:30] Bug 5 implementation complete. Changes:
+[26-03-05 23:36:30]   - ChannelViewModel: added `load(aroundMessageId:)` - when target ID provided, loads 30 messages around it using offset: -15; when nil, loads latest 30
+[26-03-05 23:36:30]   - ChannelViewModel: added `loadNewer()` - loads 20 newer messages from the newest item using offset: -20, sets hasReachedNewest when no more available
+[26-03-05 23:36:30]   - ChannelViewModel: split `isLoadingMore` into `isLoadingOlder`/`isLoadingNewer` for proper per-direction indicators
+[26-03-05 23:36:30]   - ChannelSheetView: `.task` now calls `load(aroundMessageId: initialMessageId?.messageId)`, scrolls to target or falls back to newest
+[26-03-05 23:36:30]   - ChannelSheetView: `.onChange(of: scrollPosition)` now also triggers `loadNewer()` when scrolled to last item
+[26-03-05 23:36:30]   - ChannelSheetView: separate ProgressViews for top (older) and bottom (newer) loading
+[26-03-05 23:36:30] Build: clean, no errors
