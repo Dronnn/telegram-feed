@@ -17,8 +17,8 @@ struct RootView: View {
             }
         }
         .task {
-            await TDLibService.shared.initialize()
             appState.startListening()
+            await TDLibService.shared.initialize()
         }
     }
 }

@@ -4,7 +4,7 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 
 ## Features
 
-- **Telegram authentication** — phone number, confirmation code, optional 2FA password
+- **Telegram authentication** — phone number, confirmation code, optional 2FA password. Automatic fallback to SMS when Telegram requests Firebase verification (no Firebase SDK required)
 - **Channel selection** — pick which Telegram channels to follow
 - **Unified chronological feed** — all selected channels merged into one stream
 - **Inline media** — photos, videos, GIFs, voice notes rendered directly in the feed

@@ -47,10 +47,10 @@ actor TDLibService {
     func setParameters() async throws {
         guard let client else { return }
 
-        let documentsURL = FileManager.default.urls(
+        guard let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
-        ).first!
+        ).first else { return }
 
         let databasePath = documentsURL
             .appendingPathComponent("tdlib", isDirectory: true)
@@ -86,19 +86,10 @@ actor TDLibService {
 
     func sendPhoneNumber(_ phoneNumber: String) async throws {
         guard let client else { return }
-        let settings = PhoneNumberAuthenticationSettings(
-            allowFlashCall: false,
-            allowMissedCall: false,
-            allowSmsRetrieverApi: false,
-            authenticationTokens: [],
-            firebaseAuthenticationSettings: nil,
-            hasUnknownPhoneNumber: false,
-            isCurrentPhoneNumber: false
-        )
-        print("[TDLib Auth] Sending phone number: \(phoneNumber.prefix(4))***")
+        print("[TDLib Auth] Sending phone number")
         try await client.setAuthenticationPhoneNumber(
             phoneNumber: phoneNumber,
-            settings: settings
+            settings: nil
         )
         print("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
     }

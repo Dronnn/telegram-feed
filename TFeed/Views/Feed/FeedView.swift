@@ -147,9 +147,6 @@ struct FeedView: View {
             await viewModel.refresh(selectedIDs: appState.selectedChannelIDs)
         }
         .onChange(of: scrollPosition) { _, newValue in
-            if let newValue {
-                ScrollPositionStore.save(newValue)
-            }
             viewModel.updateScrollPosition(newValue)
             if let pos = newValue,
                let first = viewModel.items.first,

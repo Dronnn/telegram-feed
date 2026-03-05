@@ -1,7 +1,6 @@
 import SwiftUI
 
 struct AuthView: View {
-    @Environment(AppState.self) private var appState
     @State private var viewModel = AuthViewModel()
     @State private var isPasswordVisible = false
 
@@ -14,41 +13,29 @@ struct AuthView: View {
                 switch viewModel.step {
                 case .phoneInput:
                     phoneInputView
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            )
-                        )
-
+                        .transition(Self.stepTransition)
                 case .codeInput:
                     codeInputView
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            )
-                        )
-
+                        .transition(Self.stepTransition)
                 case .passwordInput:
                     passwordInputView
-                        .transition(
-                            .asymmetric(
-                                insertion: .move(edge: .trailing).combined(with: .opacity),
-                                removal: .move(edge: .leading).combined(with: .opacity)
-                            )
-                        )
+                        .transition(Self.stepTransition)
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: viewModel.step)
         }
         .task {
-            viewModel.start(appState: appState)
+            viewModel.start()
         }
         .onDisappear {
             viewModel.stop()
         }
     }
+
+    private static let stepTransition = AnyTransition.asymmetric(
+        insertion: .move(edge: .trailing).combined(with: .opacity),
+        removal: .move(edge: .leading).combined(with: .opacity)
+    )
 
     // MARK: - Phone Input
 
@@ -150,8 +137,7 @@ struct AuthView: View {
 
             if viewModel.canResendCode {
                 Button("Code not received?") {
-                    viewModel.reportCodeMissing()
-                    viewModel.resendCode()
+                    viewModel.reportCodeMissingAndResend()
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)

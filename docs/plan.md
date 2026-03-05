@@ -673,3 +673,20 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] Следующему агенту: перепроверить, действительно ли Telegram сервер получает и обрабатывает `setAuthenticationPhoneNumber`/`resendAuthenticationCode` на живом номере (по логам и фактической доставке кода).
 - [x] Следующему агенту: проверить, не возвращается ли `authenticationCodeTypeFirebaseIos` и нужно ли отдельное поведение для него.
 - [x] Следующему агенту: подтвердить UX/тексты и оставить только нужные изменения.
+
+---
+
+## Code Review Fixes (2026-03-05)
+
+- [x] FINDING 1: Add retry counter for Firebase auto-resend (infinite loop risk) -- CONFIRMED, fixed
+- [x] FINDING 2: Combine reportCodeMissing + resendCode into sequential operation -- CONFIRMED, fixed
+- [x] FINDING 3: Restore nextType guard for manual resendCode -- CONFIRMED, fixed
+- [x] FINDING 4: Remove phone number digits from log output -- CONFIRMED, fixed
+- [x] FINDING 5: Move print() out of describeCodeType pure function -- CONFIRMED, fixed
+- [x] FINDING 6: Remove redundant per-scroll save in FeedView -- CONFIRMED, fixed
+- [x] FINDING 7: Remove dead code optimizeStorage -- FALSE POSITIVE (used in SettingsViewModel)
+- [x] FINDING 8: Replace appState with isStarted boolean -- CONFIRMED, fixed
+- [x] FINDING 9: Extract repeated transition in AuthView -- CONFIRMED, fixed
+- [x] FINDING 10: Replace force-unwrap on FileManager URLs -- CONFIRMED, fixed
+- [x] FINDING 11: Pass actual pushTimeout for Firebase countdown -- CONFIRMED, fixed
+- [x] FINDING 12: Add Firebase fallback note to README -- CONFIRMED, fixed
