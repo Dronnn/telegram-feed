@@ -1,4 +1,5 @@
 import SwiftUI
+import TDLibKit
 
 struct FeedCardView: View {
     let item: FeedItem
@@ -24,7 +25,7 @@ struct FeedCardView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color(.label))
 
-                    Text("·")
+                    Text("\u{00B7}")
                         .foregroundStyle(.secondary)
 
                     Text(relativeTime)
@@ -37,10 +38,8 @@ struct FeedCardView: View {
             .buttonStyle(.plain)
 
             // Text content
-            if !item.text.isEmpty {
-                Text(item.text)
-                    .font(.body)
-                    .foregroundStyle(Color(.label))
+            if let formattedText = item.formattedText, !formattedText.text.isEmpty {
+                FormattedTextView(formattedText: formattedText)
             }
 
             // Media
@@ -49,21 +48,7 @@ struct FeedCardView: View {
             }
 
             // Reactions
-            if !item.reactions.isEmpty {
-                HStack(spacing: 6) {
-                    ForEach(item.reactions, id: \.emoji) { reaction in
-                        HStack(spacing: 4) {
-                            Text(reaction.emoji)
-                            Text("\(reaction.count)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.ultraThinMaterial, in: Capsule())
-                    }
-                }
-            }
+            ReactionsBarView(reactions: item.reactions)
         }
         .padding(14)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))

@@ -7,6 +7,9 @@ extension TDLibClientManager: @retroactive @unchecked Sendable {}
 extension Chat: @retroactive @unchecked Sendable {}
 extension Message: @retroactive @unchecked Sendable {}
 extension File: @retroactive @unchecked Sendable {}
+extension FormattedText: @retroactive @unchecked Sendable {}
+extension TextEntity: @retroactive @unchecked Sendable {}
+extension TextEntityType: @retroactive @unchecked Sendable {}
 
 actor TDLibService {
     static let shared = TDLibService()

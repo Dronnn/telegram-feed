@@ -8,6 +8,8 @@ final class FeedViewModel {
     var channels: [Int64: ChannelInfo] = [:]
     var isLoading = false
     var isLoadingMore = false
+    var unreadCount = 0
+    var isAtBottom = true
 
     private var listeningTask: Task<Void, Never>?
 
@@ -106,6 +108,9 @@ final class FeedViewModel {
                     if !items.contains(where: { $0.id == item.id }) {
                         items.append(item)
                         items.sort()
+                        if !isAtBottom {
+                            unreadCount += 1
+                        }
                     }
                 }
             }
@@ -132,9 +137,33 @@ final class FeedViewModel {
         }
     }
 
+    func updateScrollPosition(_ position: FeedItemID?) {
+        guard let position else {
+            isAtBottom = true
+            unreadCount = 0
+            return
+        }
+        if let last = items.last, position == last.id {
+            isAtBottom = true
+            unreadCount = 0
+        } else {
+            isAtBottom = false
+            // Update unread count based on items below current position
+            if let index = items.firstIndex(where: { $0.id == position }) {
+                let belowCount = items.count - index - 1
+                unreadCount = max(unreadCount, belowCount)
+            }
+        }
+    }
+
+    func scrolledToBottom() {
+        isAtBottom = true
+        unreadCount = 0
+    }
+
     private func makeItem(from message: Message) -> FeedItem {
         let channel = channels[message.chatId]
-        let text = extractText(from: message.content)
+        let formatted = extractFormattedText(from: message.content)
         let reactions = extractReactions(from: message.interactionInfo)
         let mediaInfo = message.content.extractMediaInfo()
 
@@ -142,7 +171,7 @@ final class FeedViewModel {
             chatId: message.chatId,
             messageId: message.id,
             date: message.date,
-            text: text,
+            formattedText: formatted,
             channelTitle: channel?.title ?? "",
             avatarFileId: channel?.avatarFileId,
             reactions: reactions,
@@ -151,24 +180,24 @@ final class FeedViewModel {
         )
     }
 
-    private func extractText(from content: MessageContent) -> String {
+    private func extractFormattedText(from content: MessageContent) -> FormattedText? {
         switch content {
         case .messageText(let messageText):
-            return messageText.text.text
+            return messageText.text
         case .messagePhoto(let photo):
-            return photo.caption.text
+            return photo.caption.text.isEmpty ? nil : photo.caption
         case .messageVideo(let video):
-            return video.caption.text
+            return video.caption.text.isEmpty ? nil : video.caption
         case .messageAnimation(let animation):
-            return animation.caption.text
+            return animation.caption.text.isEmpty ? nil : animation.caption
         case .messageVoiceNote(let voice):
-            return voice.caption.text
+            return voice.caption.text.isEmpty ? nil : voice.caption
         case .messageAudio(let audio):
-            return audio.caption.text
+            return audio.caption.text.isEmpty ? nil : audio.caption
         case .messageDocument(let doc):
-            return doc.caption.text
+            return doc.caption.text.isEmpty ? nil : doc.caption
         default:
-            return ""
+            return nil
         }
     }
 
