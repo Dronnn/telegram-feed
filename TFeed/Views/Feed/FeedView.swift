@@ -54,7 +54,23 @@ struct FeedView: View {
         }
         .onChange(of: appState.selectedChannelIDs) { _, newIDs in
             Task {
-                await viewModel.load(selectedIDs: newIDs)
+                let previousPosition = scrollPosition
+                let previousIndex = previousPosition.flatMap { pos in
+                    viewModel.items.firstIndex(where: { $0.id == pos })
+                }
+
+                await viewModel.applyChannelChanges(newIDs: newIDs)
+
+                if let prev = previousPosition,
+                   !viewModel.items.contains(where: { $0.id == prev }),
+                   !viewModel.items.isEmpty {
+                    if let idx = previousIndex {
+                        let clampedIdx = min(idx, viewModel.items.count - 1)
+                        scrollPosition = viewModel.items[clampedIdx].id
+                    } else {
+                        scrollPosition = viewModel.items.last?.id
+                    }
+                }
             }
         }
         .sheet(isPresented: $showSettings) {

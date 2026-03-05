@@ -104,6 +104,54 @@ final class FeedViewModel {
         await load(selectedIDs: selectedIDs)
     }
 
+    func applyChannelChanges(newIDs: Set<Int64>) async {
+        let unknownIDs = newIDs.subtracting(Set(channels.keys))
+        for chatId in unknownIDs {
+            do {
+                let chat = try await TDLibService.shared.getChat(chatId: chatId)
+                if case .chatTypeSupergroup = chat.type {
+                    channels[chatId] = ChannelInfo(
+                        id: chatId,
+                        title: chat.title,
+                        avatarFileId: chat.photo?.small.id
+                    )
+                }
+            } catch {}
+        }
+
+        let validNewIDs = newIDs.intersection(Set(channels.keys))
+        let removedIDs = activeChannelIDs.subtracting(validNewIDs)
+        let addedIDs = validNewIDs.subtracting(activeChannelIDs)
+
+        guard !removedIDs.isEmpty || !addedIDs.isEmpty else { return }
+
+        var newItems: [FeedItem] = []
+        if !addedIDs.isEmpty {
+            await withTaskGroup(of: [FeedItem].self) { group in
+                for chatId in addedIDs {
+                    group.addTask {
+                        await self.fetchMessages(chatId: chatId)
+                    }
+                }
+                for await batch in group {
+                    newItems.append(contentsOf: batch)
+                }
+            }
+        }
+
+        if !removedIDs.isEmpty {
+            items.removeAll { removedIDs.contains($0.chatId) }
+        }
+
+        if !newItems.isEmpty {
+            let existingIDs = Set(items.map(\.id))
+            let unique = newItems.filter { !existingIDs.contains($0.id) }
+            items = (items + unique).sorted()
+        }
+
+        activeChannelIDs = validNewIDs
+    }
+
     func startListening() {
         listeningTask?.cancel()
         listeningTask = Task {
