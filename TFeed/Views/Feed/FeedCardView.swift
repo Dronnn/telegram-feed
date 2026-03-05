@@ -51,7 +51,7 @@ struct FeedCardView: View {
             ReactionsBarView(reactions: item.reactions)
         }
         .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20))
+        .glassEffect(.regular, in: .rect(cornerRadius: 20))
     }
 
     private var relativeTime: String {

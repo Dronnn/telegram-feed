@@ -17,6 +17,8 @@ struct FeedView: View {
                 if viewModel.isLoading && viewModel.items.isEmpty {
                     ProgressView()
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if let errorMessage = viewModel.errorMessage, viewModel.items.isEmpty {
+                    errorState(errorMessage)
                 } else if viewModel.items.isEmpty {
                     emptyState
                 } else {
@@ -46,7 +48,7 @@ struct FeedView: View {
             viewModel.stopListening()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase == .background, let position = scrollPosition {
+            if newPhase != .active, let position = scrollPosition {
                 ScrollPositionStore.save(position)
             }
         }
@@ -85,6 +87,34 @@ struct FeedView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
+
+            Spacer()
+        }
+        .padding()
+    }
+
+    private func errorState(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            Spacer()
+
+            Image(systemName: "wifi.slash")
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+
+            Text("Connection Issue")
+                .font(.title2.weight(.semibold))
+
+            Text(message)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button("Try Again") {
+                Task {
+                    await viewModel.refresh(selectedIDs: appState.selectedChannelIDs)
+                }
+            }
+            .buttonStyle(.borderedProminent)
 
             Spacer()
         }
@@ -153,7 +183,7 @@ struct FeedView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.ultraThinMaterial, in: Capsule())
+            .glassEffect(.regular.interactive(), in: .capsule)
         }
         .buttonStyle(.plain)
         .transition(.scale.combined(with: .opacity))

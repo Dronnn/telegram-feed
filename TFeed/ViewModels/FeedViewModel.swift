@@ -10,6 +10,7 @@ final class FeedViewModel {
     var isLoadingMore = false
     var unreadCount = 0
     var isAtBottom = true
+    var errorMessage: String?
 
     private var listeningTask: Task<Void, Never>?
 
@@ -18,6 +19,7 @@ final class FeedViewModel {
     func load(selectedIDs: Set<Int64>) async {
         guard !isLoading else { return }
         isLoading = true
+        errorMessage = nil
         defer { isLoading = false }
 
         do {
@@ -59,7 +61,7 @@ final class FeedViewModel {
 
             items = allItems.sorted()
         } catch {
-            // Silently handle for now
+            errorMessage = "Unable to load feed. Check your connection."
         }
     }
 
@@ -92,6 +94,7 @@ final class FeedViewModel {
     }
 
     func refresh(selectedIDs: Set<Int64>) async {
+        errorMessage = nil
         await load(selectedIDs: selectedIDs)
     }
 
