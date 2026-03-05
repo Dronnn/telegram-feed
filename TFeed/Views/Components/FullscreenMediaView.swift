@@ -153,6 +153,7 @@ private struct FullscreenAnimationPlayer: View {
 
     @State private var player: AVPlayer?
     @State private var isLoading = true
+    @State private var observer: NSObjectProtocol?
 
     var body: some View {
         ZStack {
@@ -172,6 +173,7 @@ private struct FullscreenAnimationPlayer: View {
         }
         .onDisappear {
             player?.pause()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
             player = nil
         }
     }
@@ -201,8 +203,7 @@ private struct FullscreenAnimationPlayer: View {
         isLoading = false
         avPlayer.play()
 
-        // Loop the animation
-        NotificationCenter.default.addObserver(
+        observer = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main

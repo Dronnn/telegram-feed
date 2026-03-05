@@ -43,9 +43,12 @@ final class FeedViewModel {
             }
             channels = allChannels
 
-            let activeIDs = selectedIDs.isEmpty
-                ? Set(channels.keys)
-                : selectedIDs.intersection(Set(channels.keys))
+            if selectedIDs.isEmpty {
+                items = []
+                return
+            }
+
+            let activeIDs = selectedIDs.intersection(Set(channels.keys))
 
             var allItems: [FeedItem] = []
             await withTaskGroup(of: [FeedItem].self) { group in
@@ -154,7 +157,7 @@ final class FeedViewModel {
             // Update unread count based on items below current position
             if let index = items.firstIndex(where: { $0.id == position }) {
                 let belowCount = items.count - index - 1
-                unreadCount = max(unreadCount, belowCount)
+                unreadCount = belowCount
             }
         }
     }
@@ -166,54 +169,18 @@ final class FeedViewModel {
 
     private func makeItem(from message: Message) -> FeedItem {
         let channel = channels[message.chatId]
-        let formatted = extractFormattedText(from: message.content)
-        let reactions = extractReactions(from: message.interactionInfo)
         let mediaInfo = message.content.extractMediaInfo()
 
         return FeedItem(
             chatId: message.chatId,
             messageId: message.id,
             date: message.date,
-            formattedText: formatted,
+            formattedText: message.content.extractFormattedText(),
             channelTitle: channel?.title ?? "",
             avatarFileId: channel?.avatarFileId,
-            reactions: reactions,
-            hasMedia: mediaInfo != nil,
+            reactions: message.interactionInfo?.extractReactions() ?? [],
             mediaInfo: mediaInfo
         )
-    }
-
-    private func extractFormattedText(from content: MessageContent) -> FormattedText? {
-        switch content {
-        case .messageText(let messageText):
-            return messageText.text
-        case .messagePhoto(let photo):
-            return photo.caption.text.isEmpty ? nil : photo.caption
-        case .messageVideo(let video):
-            return video.caption.text.isEmpty ? nil : video.caption
-        case .messageAnimation(let animation):
-            return animation.caption.text.isEmpty ? nil : animation.caption
-        case .messageVoiceNote(let voice):
-            return voice.caption.text.isEmpty ? nil : voice.caption
-        case .messageAudio(let audio):
-            return audio.caption.text.isEmpty ? nil : audio.caption
-        case .messageDocument(let doc):
-            return doc.caption.text.isEmpty ? nil : doc.caption
-        default:
-            return nil
-        }
-    }
-
-    private func extractReactions(from info: MessageInteractionInfo?) -> [FeedItem.Reaction] {
-        guard let reactions = info?.reactions?.reactions else { return [] }
-        return reactions.compactMap { reaction in
-            switch reaction.type {
-            case .reactionTypeEmoji(let emoji):
-                return FeedItem.Reaction(emoji: emoji.emoji, count: reaction.totalCount)
-            default:
-                return nil
-            }
-        }
     }
 
 }

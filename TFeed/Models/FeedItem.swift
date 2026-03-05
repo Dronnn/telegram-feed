@@ -9,7 +9,6 @@ struct FeedItem: Identifiable, Sendable, Comparable {
     let channelTitle: String
     let avatarFileId: Int?
     let reactions: [Reaction]
-    let hasMedia: Bool
     let mediaInfo: MediaInfo?
 
     var id: FeedItemID { FeedItemID(chatId: chatId, messageId: messageId) }

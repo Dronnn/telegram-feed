@@ -45,12 +45,12 @@ final class SettingsViewModel {
         defer { isClearing = false }
         do {
             try await TDLibService.shared.optimizeStorage()
-        } catch {}
+        } catch { print("[TFeed] Error: \(error)") }
     }
 
     func logout() async {
         do {
             try await TDLibService.shared.logOut()
-        } catch {}
+        } catch { print("[TFeed] Error: \(error)") }
     }
 }

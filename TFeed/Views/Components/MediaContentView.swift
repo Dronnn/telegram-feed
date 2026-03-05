@@ -85,6 +85,7 @@ private struct AnimationInlineView: View {
 
     @State private var player: AVPlayer?
     @State private var isLoading = true
+    @State private var observer: NSObjectProtocol?
 
     var body: some View {
         ZStack {
@@ -109,6 +110,8 @@ private struct AnimationInlineView: View {
         }
         .onDisappear {
             player?.pause()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            player = nil
         }
     }
 
@@ -138,7 +141,7 @@ private struct AnimationInlineView: View {
         isLoading = false
         avPlayer.play()
 
-        NotificationCenter.default.addObserver(
+        observer = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: item,
             queue: .main

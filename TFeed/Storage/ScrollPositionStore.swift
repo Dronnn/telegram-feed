@@ -1,6 +1,6 @@
 import Foundation
 
-struct ScrollPositionStore: Sendable {
+enum ScrollPositionStore {
     private static let chatIdKey = "lastRead.chatId"
     private static let messageIdKey = "lastRead.messageId"
 

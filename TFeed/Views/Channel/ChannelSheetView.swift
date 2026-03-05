@@ -114,18 +114,4 @@ struct ChannelSheetView: View {
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
     }
-
-    private func relativeTime(for timestamp: Int) -> String {
-        let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-        let interval = Date.now.timeIntervalSince(date)
-
-        if interval < 60 { return "now" }
-        if interval < 3600 { return "\(Int(interval / 60))m" }
-        if interval < 86400 { return "\(Int(interval / 3600))h" }
-        if interval < 604800 { return "\(Int(interval / 86400))d" }
-
-        let formatter = DateFormatter()
-        formatter.dateFormat = "MMM d"
-        return formatter.string(from: date)
-    }
 }

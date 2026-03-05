@@ -108,9 +108,17 @@ final class AuthViewModel {
     }
 
     func goBack() {
-        code = ""
         errorMessage = nil
-        step = .phoneInput
+        switch step {
+        case .passwordInput:
+            password = ""
+            step = .codeInput
+        case .codeInput:
+            code = ""
+            step = .phoneInput
+        default:
+            break
+        }
     }
 
     // MARK: - Helpers
