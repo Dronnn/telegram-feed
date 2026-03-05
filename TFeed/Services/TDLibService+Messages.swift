@@ -1,0 +1,21 @@
+import Foundation
+import TDLibKit
+
+extension TDLibService {
+    func getChatHistory(
+        chatId: Int64,
+        fromMessageId: Int64 = 0,
+        limit: Int = 30,
+        offset: Int = 0
+    ) async throws -> [Message] {
+        guard let client = getClient() else { return [] }
+        let result = try await client.getChatHistory(
+            chatId: chatId,
+            fromMessageId: fromMessageId,
+            limit: limit,
+            offset: offset,
+            onlyLocal: false
+        )
+        return result.messages ?? []
+    }
+}
