@@ -38,3 +38,6 @@ TFeed/Core/Constants.swift
 !default.mode2v3
 *.perspectivev3
 !default.perspectivev3
+
+# ralphex progress logs
+.ralphex/progress/
