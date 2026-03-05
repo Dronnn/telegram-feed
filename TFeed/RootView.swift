@@ -4,15 +4,21 @@ struct RootView: View {
     @Environment(AppState.self) private var appState
 
     var body: some View {
-        switch appState.authState {
-        case .loading:
-            ProgressView("Starting TDLib...")
+        Group {
+            switch appState.authState {
+            case .loading:
+                ProgressView("Starting TDLib...")
 
-        case .unauthorized:
-            AuthView()
+            case .unauthorized:
+                AuthView()
 
-        case .authorized:
-            FeedView()
+            case .authorized:
+                FeedView()
+            }
+        }
+        .task {
+            await TDLibService.shared.initialize()
+            appState.startListening()
         }
     }
 }

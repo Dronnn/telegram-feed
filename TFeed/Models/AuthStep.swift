@@ -1,6 +1,6 @@
 import Foundation
 
-enum AuthStep: Sendable {
+enum AuthStep: Sendable, Equatable, Hashable {
     case phoneInput
     case codeInput
     case passwordInput
