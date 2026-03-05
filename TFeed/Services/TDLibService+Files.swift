@@ -3,7 +3,7 @@ import TDLibKit
 
 extension TDLibService {
     func downloadFile(id: Int, priority: Int = 5) async throws -> File {
-        guard let client = getClient() else { throw TDLibServiceError.noClient }
+        guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
         return try await client.downloadFile(
             fileId: id,
             limit: 0,
@@ -14,7 +14,7 @@ extension TDLibService {
     }
 
     func getFile(id: Int) async throws -> File {
-        guard let client = getClient() else { throw TDLibServiceError.noClient }
+        guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
         return try await client.getFile(fileId: id)
     }
 

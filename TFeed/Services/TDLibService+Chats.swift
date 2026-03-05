@@ -18,7 +18,7 @@ extension TDLibService {
     }
 
     func getChat(chatId: Int64) async throws -> Chat {
-        guard let client = getClient() else { throw TDLibServiceError.noClient }
+        guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
         return try await client.getChat(chatId: chatId)
     }
 }

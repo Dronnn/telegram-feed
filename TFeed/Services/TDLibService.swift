@@ -20,6 +20,11 @@ extension ResendCodeReason: @retroactive @unchecked Sendable {}
 extension ResendCodeReasonVerificationFailed: @retroactive @unchecked Sendable {}
 
 actor TDLibService {
+    enum TDLibServiceError: Swift.Error {
+        case clientNotInitialized
+        case documentDirectoryUnavailable
+    }
+
     static let shared = TDLibService()
 
     private var manager: TDLibClientManager?
@@ -51,12 +56,12 @@ actor TDLibService {
     // MARK: - TDLib Parameters
 
     func setParameters() async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
 
         guard let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
-        ).first else { return }
+        ).first else { throw TDLibServiceError.documentDirectoryUnavailable }
 
         let databasePath = documentsURL
             .appendingPathComponent("tdlib", isDirectory: true)
