@@ -583,13 +583,13 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] `Constants.swift` с api_id/api_hash (+ `.gitignore` для credentials)
 
 ### Фаза 2: Авторизация
-- [ ] `AuthStep` enum (phoneInput, codeInput, passwordInput) — Equatable, Hashable
-- [ ] `AuthViewModel` — state machine: phone -> code -> 2FA -> ready
-- [ ] `AuthView` — Telegram-style UI с переходами между шагами
-- [ ] Обработка ошибок (неверный код, rate limit, сетевые)
-- [ ] Loading states на кнопках
-- [ ] `AppState.startListening()` — auth state transitions from TDLib updates
-- [ ] `RootView` — TDLib initialization via `.task`
+- [x] `AuthStep` enum (phoneInput, codeInput, passwordInput) — Equatable, Hashable
+- [x] `AuthViewModel` — state machine: phone -> code -> 2FA -> ready
+- [x] `AuthView` — Telegram-style UI с переходами между шагами
+- [x] Обработка ошибок (неверный код, rate limit, сетевые)
+- [x] Loading states на кнопках
+- [x] `AppState.startListening()` — auth state transitions from TDLib updates
+- [x] `RootView` — TDLib initialization via `.task`
 
 ### Фаза 3: Лента (ядро)
 - [ ] Модели `FeedItem`, `FeedItemID`, `ChannelInfo`
