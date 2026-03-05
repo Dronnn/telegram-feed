@@ -8,9 +8,13 @@ final class ChannelViewModel {
     var isLoading = false
     var isLoadingOlder = false
     var isLoadingNewer = false
+    var hasReachedOldest = false
     var hasReachedNewest = false
 
     let channelInfo: ChannelInfo
+
+    private let initialWindow = 50
+    private let pageSize = 30
 
     init(channelInfo: ChannelInfo) {
         self.channelInfo = channelInfo
@@ -21,65 +25,152 @@ final class ChannelViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        do {
-            let messages: [Message]
-            if let aroundMessageId {
-                messages = try await TDLibService.shared.getChatHistory(
-                    chatId: channelInfo.id,
-                    fromMessageId: aroundMessageId,
-                    limit: 30,
-                    offset: -15
-                )
-            } else {
-                messages = try await TDLibService.shared.getChatHistory(
-                    chatId: channelInfo.id,
-                    limit: 30
-                )
+        hasReachedOldest = false
+        hasReachedNewest = false
+
+        let messages: [Message]
+        if let aroundMessageId {
+            let around = await fetchWindow(aroundMessageId: aroundMessageId)
+            if around.isEmpty {
+                messages = await fetchLatest(limit: initialWindow)
                 hasReachedNewest = true
+            } else {
+                messages = around
             }
-            items = messages.map { makeItem(from: $0) }.sorted()
-        } catch { print("[TFeed] Error: \(error)") }
+        } else {
+            messages = await fetchLatest(limit: initialWindow)
+            hasReachedNewest = true
+            if messages.count < initialWindow {
+                hasReachedOldest = true
+            }
+        }
+
+        var mappedItems = makeItems(from: messages)
+        if let aroundMessageId,
+           !mappedItems.contains(where: { $0.matches(FeedItemID(chatId: channelInfo.id, messageId: aroundMessageId)) }),
+           let exactMessage = await fetchExactMessage(messageId: aroundMessageId) {
+            mappedItems = normalizeItems(mappedItems + makeItems(from: [exactMessage]))
+        }
+
+        items = normalizeItems(mappedItems)
     }
 
     func loadOlder() async {
-        guard !isLoadingOlder, let oldest = items.first else { return }
+        guard !isLoadingOlder, !hasReachedOldest, let oldest = items.first else { return }
         isLoadingOlder = true
         defer { isLoadingOlder = false }
 
-        do {
-            let messages = try await TDLibService.shared.getChatHistory(
-                chatId: channelInfo.id,
-                fromMessageId: oldest.messageId,
-                limit: 20
-            )
-            let existingIDs = Set(items.map(\.id))
-            let newItems = messages.map { makeItem(from: $0) }.filter { !existingIDs.contains($0.id) }
-            if !newItems.isEmpty {
-                items = (items + newItems).sorted()
+        let oldestMessageID = oldest.representedMessageIds.min() ?? oldest.messageId
+        let messages = await fetchHistory(
+            fromMessageId: oldestMessageID,
+            limit: pageSize
+        )
+
+        if messages.isEmpty || messages.count <= 1 {
+            hasReachedOldest = true
+            return
+        }
+
+        let existingMessageIDs = representedMessageIDs(in: items)
+        let newItems = makeItems(
+            from: messages.filter {
+                !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
             }
-        } catch { print("[TFeed] Error: \(error)") }
+        )
+
+        if newItems.isEmpty {
+            hasReachedOldest = true
+            return
+        }
+
+        items = normalizeItems(items + newItems)
     }
 
     func loadNewer() async {
-        guard !isLoadingNewer, let newest = items.last else { return }
+        guard !isLoadingNewer, !hasReachedNewest, let newest = items.last else { return }
         isLoadingNewer = true
         defer { isLoadingNewer = false }
 
-        do {
-            let messages = try await TDLibService.shared.getChatHistory(
-                chatId: channelInfo.id,
-                fromMessageId: newest.messageId,
-                limit: 20,
-                offset: -20
-            )
-            let existingIDs = Set(items.map(\.id))
-            let newItems = messages.map { makeItem(from: $0) }.filter { !existingIDs.contains($0.id) }
-            if newItems.isEmpty {
-                hasReachedNewest = true
-            } else {
-                items = (items + newItems).sorted()
+        let newestMessageID = newest.representedMessageIds.max() ?? newest.messageId
+        let messages = await fetchHistory(
+            fromMessageId: newestMessageID,
+            limit: pageSize,
+            offset: -(pageSize - 1)
+        )
+
+        if messages.isEmpty {
+            hasReachedNewest = true
+            return
+        }
+
+        let existingMessageIDs = representedMessageIDs(in: items)
+        let newItems = makeItems(
+            from: messages.filter {
+                !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
             }
-        } catch { print("[TFeed] Error: \(error)") }
+        )
+
+        if newItems.isEmpty {
+            hasReachedNewest = true
+            return
+        }
+
+        items = normalizeItems(items + newItems)
+    }
+
+    // MARK: - Private
+
+    private func fetchLatest(limit: Int) async -> [Message] {
+        let latest = await fetchHistory(fromMessageId: 0, limit: 1)
+        guard let newest = latest.first else { return [] }
+        return await fetchHistory(fromMessageId: newest.id, limit: limit)
+    }
+
+    private func fetchHistory(fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
+        do {
+            return try await TDLibService.shared.getChatHistory(
+                chatId: channelInfo.id,
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset
+            )
+        } catch {
+            return []
+        }
+    }
+
+    private func fetchExactMessage(messageId: Int64) async -> Message? {
+        let exact = await fetchHistory(fromMessageId: messageId, limit: 1, offset: 0)
+        return exact.first(where: { $0.id == messageId })
+    }
+
+    private func fetchWindow(aroundMessageId: Int64) async -> [Message] {
+        let around = await fetchHistory(
+            fromMessageId: aroundMessageId,
+            limit: initialWindow,
+            offset: -(initialWindow / 2)
+        )
+        if !around.isEmpty {
+            return around
+        }
+
+        guard let exactMessage = await fetchExactMessage(messageId: aroundMessageId) else {
+            return []
+        }
+
+        let halfWindow = max(initialWindow / 2, 1)
+        let older = await fetchHistory(
+            fromMessageId: exactMessage.id,
+            limit: halfWindow + 1
+        )
+        let newer = await fetchHistory(
+            fromMessageId: exactMessage.id,
+            limit: halfWindow,
+            offset: -(halfWindow - 1)
+        )
+
+        let combined = uniqueMessages(older + newer)
+        return combined.isEmpty ? [exactMessage] : combined
     }
 
     private func makeItem(from message: Message) -> FeedItem {
@@ -93,7 +184,104 @@ final class ChannelViewModel {
             channelTitle: channelInfo.title,
             avatarFileId: channelInfo.avatarFileId,
             reactions: message.interactionInfo?.extractReactions() ?? [],
-            mediaInfo: mediaInfo
+            mediaAlbumId: normalizedAlbumID(for: message),
+            representedMessageIds: [message.id],
+            mediaItems: mediaInfo.map { [$0] } ?? []
         )
     }
+
+    private func makeItems(from messages: [Message]) -> [FeedItem] {
+        normalizeItems(messages.map { makeItem(from: $0) })
+    }
+
+    private func normalizeItems(_ items: [FeedItem]) -> [FeedItem] {
+        let sorted = items.sorted()
+        var normalized: [FeedItem] = []
+        var seenMessageIDs: Set<FeedItemID> = []
+
+        for item in sorted {
+            let unseenRepresentedIDs = item.representedMessageIds.filter {
+                seenMessageIDs.insert(FeedItemID(chatId: item.chatId, messageId: $0)).inserted
+            }
+
+            guard !unseenRepresentedIDs.isEmpty else { continue }
+
+            let candidate = unseenRepresentedIDs.count == item.representedMessageIds.count
+                ? item
+                : FeedItem(
+                    chatId: item.chatId,
+                    messageId: unseenRepresentedIDs.max() ?? item.messageId,
+                    date: item.date,
+                    formattedText: item.formattedText,
+                    channelTitle: item.channelTitle,
+                    avatarFileId: item.avatarFileId,
+                    reactions: item.reactions,
+                    mediaAlbumId: item.mediaAlbumId,
+                    representedMessageIds: unseenRepresentedIDs,
+                    mediaItems: item.mediaItems
+                )
+
+            if let last = normalized.last, canMergeAlbum(last, candidate) {
+                normalized[normalized.count - 1] = mergeAlbumItems(last, candidate)
+            } else {
+                normalized.append(candidate)
+            }
+        }
+
+        return normalized
+    }
+
+    private func uniqueMessages(_ messages: [Message]) -> [Message] {
+        var seen: Set<Int64> = []
+        return messages.filter { seen.insert($0.id).inserted }
+    }
+
+    private func canMergeAlbum(_ lhs: FeedItem, _ rhs: FeedItem) -> Bool {
+        guard let lhsAlbumID = lhs.mediaAlbumId,
+              let rhsAlbumID = rhs.mediaAlbumId else {
+            return false
+        }
+        return lhs.chatId == rhs.chatId && lhsAlbumID == rhsAlbumID
+    }
+
+    private func mergeAlbumItems(_ lhs: FeedItem, _ rhs: FeedItem) -> FeedItem {
+        let formattedText = lhs.formattedText ?? rhs.formattedText
+        let reactions = lhs.reactions.isEmpty ? rhs.reactions : lhs.reactions
+        let representedMessageIds = Array(
+            Set(lhs.representedMessageIds + rhs.representedMessageIds)
+        ).sorted()
+        let mediaItems = (lhs.mediaItems + rhs.mediaItems).reduce(into: [MediaInfo]()) { partialResult, item in
+            guard !partialResult.contains(item) else { return }
+            partialResult.append(item)
+        }
+
+        return FeedItem(
+            chatId: lhs.chatId,
+            messageId: representedMessageIds.max() ?? lhs.messageId,
+            date: max(lhs.date, rhs.date),
+            formattedText: formattedText,
+            channelTitle: lhs.channelTitle,
+            avatarFileId: lhs.avatarFileId,
+            reactions: reactions,
+            mediaAlbumId: lhs.mediaAlbumId,
+            representedMessageIds: representedMessageIds,
+            mediaItems: mediaItems
+        )
+    }
+
+    private func normalizedAlbumID(for message: Message) -> Int64? {
+        let albumID = message.mediaAlbumId.rawValue
+        return albumID == 0 ? nil : albumID
+    }
+
+    private func representedMessageIDs(in items: [FeedItem]) -> Set<FeedItemID> {
+        Set(
+            items.flatMap { item in
+                item.representedMessageIds.map {
+                    FeedItemID(chatId: item.chatId, messageId: $0)
+                }
+            }
+        )
+    }
+
 }

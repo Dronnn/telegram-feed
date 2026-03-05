@@ -6,6 +6,9 @@ struct ChannelSheetView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChannelViewModel
     @State private var scrollPosition: FeedItemID?
+    @State private var pendingInitialMessageID: FeedItemID?
+    @State private var requestedScrollTarget: FeedItemID?
+    @State private var hasScheduledInitialPlacement = false
 
     init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil) {
         self.channelInfo = channelInfo
@@ -46,13 +49,15 @@ struct ChannelSheetView: View {
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
         .task {
+            pendingInitialMessageID = initialMessageId
+            requestedScrollTarget = nil
+            hasScheduledInitialPlacement = false
+            scrollPosition = nil
             await viewModel.load(aroundMessageId: initialMessageId?.messageId)
-            if let initialMessageId,
-               viewModel.items.contains(where: { $0.id == initialMessageId }) {
-                scrollPosition = initialMessageId
-            } else if let last = viewModel.items.last {
-                scrollPosition = last.id
-            }
+            restoreInitialScrollIfPossible()
+        }
+        .onChange(of: viewModel.items) { _, _ in
+            restoreInitialScrollIfPossible()
         }
     }
 
@@ -68,34 +73,55 @@ struct ChannelSheetView: View {
     }
 
     private var messageList: some View {
-        ScrollView(.vertical) {
-            LazyVStack(spacing: 12) {
-                if viewModel.isLoadingOlder {
-                    ProgressView()
-                        .padding()
-                }
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                LazyVStack(spacing: 12) {
+                    if viewModel.isLoadingOlder {
+                        ProgressView()
+                            .padding()
+                    }
 
-                ForEach(viewModel.items) { item in
-                    channelCard(item: item)
-                        .padding(.horizontal, 16)
-                }
+                    ForEach(viewModel.items) { item in
+                        channelCard(item: item)
+                            .padding(.horizontal, 16)
+                            .id(item.id)
+                    }
 
-                if viewModel.isLoadingNewer {
-                    ProgressView()
-                        .padding()
+                    if viewModel.isLoadingNewer {
+                        ProgressView()
+                            .padding()
+                    } else if !viewModel.hasReachedNewest {
+                        Color.clear
+                            .frame(height: 1)
+                    }
+                }
+                .scrollTargetLayout()
+                .padding(.vertical, 12)
+            }
+            .scrollPosition(id: $scrollPosition)
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .onChange(of: scrollPosition) { _, newValue in
+                guard let pos = newValue else { return }
+                if let first = viewModel.items.first, pos == first.id, !viewModel.hasReachedOldest {
+                    Task { await viewModel.loadOlder() }
+                }
+                if let last = viewModel.items.last, pos == last.id, !viewModel.hasReachedNewest {
+                    Task { await viewModel.loadNewer() }
                 }
             }
-            .padding(.vertical, 12)
-        }
-        .scrollPosition(id: $scrollPosition)
-        .scrollEdgeEffectStyle(.soft, for: .all)
-        .onChange(of: scrollPosition) { _, newValue in
-            guard let pos = newValue else { return }
-            if let first = viewModel.items.first, pos == first.id {
-                Task { await viewModel.loadOlder() }
-            }
-            if let last = viewModel.items.last, pos == last.id, !viewModel.hasReachedNewest {
-                Task { await viewModel.loadNewer() }
+            .onChange(of: requestedScrollTarget) { _, target in
+                guard let target else { return }
+                Task { @MainActor in
+                    await Task.yield()
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        proxy.scrollTo(target, anchor: .top)
+                    }
+                    scrollPosition = target
+                    await Task.yield()
+                    proxy.scrollTo(target, anchor: .top)
+                    scrollPosition = target
+                    requestedScrollTarget = nil
+                }
             }
         }
     }
@@ -121,5 +147,33 @@ struct ChannelSheetView: View {
         }
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
+    }
+
+    private func restoreInitialScrollIfPossible() {
+        guard requestedScrollTarget == nil else { return }
+
+        if let pendingInitialMessageID {
+            if let target = viewModel.items.first(where: { $0.matches(pendingInitialMessageID) }) {
+                self.pendingInitialMessageID = nil
+                hasScheduledInitialPlacement = true
+                requestScroll(to: target.id)
+                return
+            }
+
+            if viewModel.isLoading {
+                return
+            }
+
+            self.pendingInitialMessageID = nil
+        }
+
+        guard !hasScheduledInitialPlacement, scrollPosition == nil, let last = viewModel.items.last else { return }
+        hasScheduledInitialPlacement = true
+        requestScroll(to: last.id)
+    }
+
+    private func requestScroll(to target: FeedItemID) {
+        guard requestedScrollTarget != target else { return }
+        requestedScrollTarget = target
     }
 }

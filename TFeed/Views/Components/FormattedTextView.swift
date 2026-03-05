@@ -3,7 +3,7 @@ import TDLibKit
 
 struct FormattedTextView: View {
     let formattedText: FormattedText
-    var onTelegramLinkTap: ((URL) -> Void)? = nil
+    var onTelegramLinkTap: ((URL) -> Bool)? = nil
     @State private var revealedSpoilers: Set<Int> = []
 
     var body: some View {
@@ -16,8 +16,7 @@ struct FormattedTextView: View {
                     return .handled
                 }
                 if isTelegramLink(url), let onTelegramLinkTap {
-                    onTelegramLinkTap(url)
-                    return .handled
+                    return onTelegramLinkTap(url) ? .handled : .systemAction
                 }
                 return .systemAction
             })

@@ -6,6 +6,7 @@ enum MediaInfo: Sendable, Equatable {
     case animation(AnimationMediaInfo)
     case voiceNote(VoiceNoteMediaInfo)
     case audio(AudioMediaInfo)
+    indirect case album([MediaInfo])
 
     struct PhotoMediaInfo: Sendable, Equatable {
         let fileId: Int
@@ -57,6 +58,8 @@ enum MediaInfo: Sendable, Equatable {
             return CGFloat(info.width) / CGFloat(info.height)
         case .voiceNote, .audio:
             return nil
+        case .album(let items):
+            return items.first?.aspectRatio
         }
     }
 }
