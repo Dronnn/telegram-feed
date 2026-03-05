@@ -84,10 +84,28 @@ actor TDLibService {
 
     func sendPhoneNumber(_ phoneNumber: String) async throws {
         guard let client else { return }
+        let settings = PhoneNumberAuthenticationSettings(
+            allowFlashCall: false,
+            allowMissedCall: false,
+            allowSmsRetrieverApi: false,
+            authenticationTokens: [],
+            firebaseAuthenticationSettings: nil,
+            hasUnknownPhoneNumber: false,
+            isCurrentPhoneNumber: false
+        )
+        print("[TDLib Auth] Sending phone number: \(phoneNumber.prefix(4))***")
         try await client.setAuthenticationPhoneNumber(
             phoneNumber: phoneNumber,
-            settings: nil
+            settings: settings
         )
+        print("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
+    }
+
+    func resendAuthenticationCode() async throws {
+        guard let client else { return }
+        print("[TDLib Auth] Resending authentication code")
+        _ = try await client.resendAuthenticationCode(reason: .resendCodeReasonUserRequest)
+        print("[TDLib Auth] resendAuthenticationCode succeeded")
     }
 
     func sendCode(_ code: String) async throws {

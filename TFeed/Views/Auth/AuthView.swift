@@ -113,11 +113,19 @@ struct AuthView: View {
                 .font(.title3.bold())
                 .padding(.bottom, 8)
 
-            Text("We've sent the code to the Telegram\napp on your other device.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.bottom, 40)
+            if let deliveryInfo = viewModel.codeDeliveryDescription {
+                Text(deliveryInfo)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 40)
+            } else {
+                Text("We've sent the code to the Telegram\napp on your other device.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 40)
+            }
 
             underlinedTextField("Code", text: $viewModel.code)
                 .keyboardType(.numberPad)
@@ -126,6 +134,19 @@ struct AuthView: View {
 
             errorLabel
                 .padding(.horizontal, 40)
+
+            if viewModel.canResendCode {
+                Button("Resend code") {
+                    viewModel.resendCode()
+                }
+                .font(.subheadline)
+                .padding(.top, 16)
+            } else if viewModel.resendCountdown > 0 {
+                Text("Resend code in \(viewModel.resendCountdown)s")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 16)
+            }
 
             Spacer()
 
