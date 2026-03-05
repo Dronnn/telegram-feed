@@ -35,7 +35,7 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 1. **Clone the repository**
 
    ```bash
-   git clone https://github.com/andreasmaier/telegram-feed.git
+   git clone https://github.com/Dronnn/telegram-feed.git
    cd telegram-feed
    ```
 
