@@ -592,13 +592,13 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] `RootView` — TDLib initialization via `.task`
 
 ### Фаза 3: Лента (ядро)
-- [ ] Модели `FeedItem`, `FeedItemID`, `ChannelInfo`
-- [ ] `FeedViewModel` — загрузка каналов, fetch messages, merge sort
-- [ ] `FeedView` — ScrollView + LazyVStack, toolbar с настройками
-- [ ] `FeedCardView` — шапка + текст + placeholder для медиа + реакции
-- [ ] Infinite scroll (подгрузка старых при скролле вверх)
-- [ ] `.refreshable` pull-to-refresh
-- [ ] Подписка на `updateNewMessage` для real-time
+- [x] Модели `FeedItem`, `FeedItemID`, `ChannelInfo`
+- [x] `FeedViewModel` — загрузка каналов, fetch messages, merge sort
+- [x] `FeedView` — ScrollView + LazyVStack, toolbar с настройками
+- [x] `FeedCardView` — шапка + текст + placeholder для медиа + реакции
+- [x] Infinite scroll (подгрузка старых при скролле вверх)
+- [x] `.refreshable` pull-to-refresh
+- [x] Подписка на `updateNewMessage` для real-time
 
 ### Фаза 4: Медиа
 - [ ] `TdImageView` — minithumbnail -> thumbnail -> full-size pipeline
