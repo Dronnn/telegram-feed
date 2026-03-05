@@ -649,19 +649,19 @@ Push на GitHub пока не делаем — репозиторий на GitH
 
 ## Phase 1: Foundation - Implementation Checklist
 
-- [ ] Create Xcode project (pbxproj, workspace) with iOS 26 target, Swift 6, TDLibKit SPM
-- [ ] Create TFeedApp.swift - SwiftUI app entry point with AppState environment
-- [ ] Create RootView.swift - routing between auth states
-- [ ] Create Core/AppState.swift - @Observable with AuthState enum
-- [ ] Create Core/Constants.swift - API credentials placeholder (gitignored)
-- [ ] Create Models/AuthStep.swift - auth step enum
-- [ ] Create Services/TDLibService.swift - actor singleton wrapping TDLibKit
-- [ ] Create Services/UpdateRouter.swift - @MainActor AsyncStream broadcast
-- [ ] Create Views/Auth/AuthView.swift - placeholder
-- [ ] Create Views/Feed/FeedView.swift - placeholder
-- [ ] Create Resources/Assets.xcassets - accent color, app icon
-- [ ] Create TFeed.entitlements - empty skeleton
-- [ ] Update .gitignore - Xcode, credentials, macOS ignores
+- [x] Create Xcode project (pbxproj, workspace) with iOS 26 target, Swift 6, TDLibKit SPM
+- [x] Create TFeedApp.swift - SwiftUI app entry point with AppState environment
+- [x] Create RootView.swift - routing between auth states
+- [x] Create Core/AppState.swift - @Observable with AuthState enum
+- [x] Create Core/Constants.swift - API credentials placeholder (gitignored)
+- [x] Create Models/AuthStep.swift - auth step enum
+- [x] Create Services/TDLibService.swift - actor singleton wrapping TDLibKit
+- [x] Create Services/UpdateRouter.swift - @MainActor AsyncStream broadcast
+- [x] Create Views/Auth/AuthView.swift - placeholder
+- [x] Create Views/Feed/FeedView.swift - placeholder
+- [x] Create Resources/Assets.xcassets - accent color, app icon
+- [x] Create TFeed.entitlements - empty skeleton
+- [x] Update .gitignore - Xcode, credentials, macOS ignores
 
 ---
 
