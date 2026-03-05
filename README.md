@@ -45,7 +45,7 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 
    ```swift
    enum Constants {
-       static let apiId: Int32 = YOUR_API_ID
+       static let apiId: Int = YOUR_API_ID
        static let apiHash = "YOUR_API_HASH"
    }
    ```

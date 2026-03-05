@@ -141,19 +141,6 @@ struct AuthView: View {
 
     private var passwordInputView: some View {
         VStack(spacing: 0) {
-            HStack {
-                Button {
-                    viewModel.goBack()
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .font(.title3.weight(.medium))
-                }
-                .padding(.leading, 16)
-                .padding(.top, 16)
-
-                Spacer()
-            }
-
             Spacer()
 
             stepIcon("lock.fill")

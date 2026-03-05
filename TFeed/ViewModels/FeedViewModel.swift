@@ -13,6 +13,7 @@ final class FeedViewModel {
     var errorMessage: String?
 
     private var listeningTask: Task<Void, Never>?
+    private var activeChannelIDs: Set<Int64> = []
 
     // MARK: - Public
 
@@ -45,10 +46,12 @@ final class FeedViewModel {
 
             if selectedIDs.isEmpty {
                 items = []
+                activeChannelIDs = []
                 return
             }
 
             let activeIDs = selectedIDs.intersection(Set(channels.keys))
+            activeChannelIDs = activeIDs
 
             var allItems: [FeedItem] = []
             await withTaskGroup(of: [FeedItem].self) { group in
@@ -73,7 +76,7 @@ final class FeedViewModel {
         isLoadingMore = true
         defer { isLoadingMore = false }
 
-        let activeIDs = Set(items.map(\.chatId))
+        let activeIDs = activeChannelIDs
         var olderItems: [FeedItem] = []
 
         await withTaskGroup(of: [FeedItem].self) { group in
@@ -109,7 +112,7 @@ final class FeedViewModel {
                 guard !Task.isCancelled else { break }
                 if case .updateNewMessage(let newMessage) = update {
                     let message = newMessage.message
-                    guard channels[message.chatId] != nil else { continue }
+                    guard activeChannelIDs.contains(message.chatId) else { continue }
                     let item = makeItem(from: message)
                     if !items.contains(where: { $0.id == item.id }) {
                         items.append(item)

@@ -24,7 +24,12 @@ final class AppState {
                 if case .updateAuthorizationState(let state) = update {
                     switch state.authorizationState {
                     case .authorizationStateWaitTdlibParameters:
-                        try? await TDLibService.shared.setParameters()
+                        do {
+                            try await TDLibService.shared.setParameters()
+                        } catch {
+                            print("[AppState] Failed to set TDLib parameters: \(error)")
+                            self.authState = .unauthorized
+                        }
                     case .authorizationStateWaitPhoneNumber:
                         self.authState = .unauthorized
                     case .authorizationStateWaitCode:

@@ -110,9 +110,6 @@ final class AuthViewModel {
     func goBack() {
         errorMessage = nil
         switch step {
-        case .passwordInput:
-            password = ""
-            step = .codeInput
         case .codeInput:
             code = ""
             step = .phoneInput
