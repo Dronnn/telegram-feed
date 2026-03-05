@@ -161,7 +161,7 @@ struct FeedItem: Identifiable, Sendable, Comparable {
             channelTitle: channelTitle,
             avatarFileId: avatarFileId,
             reactions: combinedReactions(from: ordered),
-            mediaAlbumId: primary.mediaAlbumId == 0 ? nil : primary.mediaAlbumId,
+            mediaAlbumId: primary.mediaAlbumId.rawValue == 0 ? nil : primary.mediaAlbumId.rawValue,
             representedMessageIds: ordered.map(\.id),
             mediaItems: ordered.compactMap { $0.content.extractMediaInfo() }
         )

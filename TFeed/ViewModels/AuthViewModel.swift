@@ -143,6 +143,7 @@ final class AuthViewModel {
 
     func resendCode() {
         guard canResendCode, codeInfo?.nextType != nil else { return }
+        firebaseResendTask?.cancel()
         errorMessage = nil
         isLoading = true
         Task {
@@ -158,6 +159,7 @@ final class AuthViewModel {
 
     func reportCodeMissingAndResend() {
         guard canResendCode else { return }
+        firebaseResendTask?.cancel()
         errorMessage = nil
         isLoading = true
         Task {
@@ -228,8 +230,12 @@ final class AuthViewModel {
 
     private func startResendCountdown(timeout: Int) {
         countdownTask?.cancel()
-        let effectiveTimeout = timeout > 0 ? timeout : 30
-        resendCountdown = effectiveTimeout
+        if timeout <= 0 {
+            resendCountdown = 0
+            canResendCode = true
+            return
+        }
+        resendCountdown = timeout
         canResendCode = false
         countdownTask = Task { [weak self] in
             while let self, self.resendCountdown > 0 {

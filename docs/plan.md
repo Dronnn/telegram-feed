@@ -667,12 +667,12 @@ Push на GitHub пока не делаем — репозиторий на GitH
 
 ## Auth Hotfix Plan (2026-03-05)
 
-- [x] По запросу пользователя код auth-фикса откатан; следующему агенту нужно реализовать фиксы заново и перепроверить их.
-- [x] Следующему агенту (ПЕРВЫЙ ПРИОРИТЕТ): устранить ошибку "код не приходит в официальный Telegram-клиент и не приходит по SMS после ввода номера"; подтвердить end-to-end на реальном номере, что код реально доходит пользователю.
+- [x] По запросу пользователя код auth-фикса откатан; следующий этап — реализовать фиксы заново и перепроверить их.
+- [x] Первый приоритет: устранить ошибку "код не приходит в официальный Telegram-клиент и не приходит по SMS после ввода номера"; подтвердить end-to-end на реальном номере, что код реально доходит пользователю.
 - [x] Статус на 2026-03-05 (device check): пользователь подтвердил, что код все еще не приходит в официальный Telegram-клиент и не приходит по SMS.
-- [x] Следующему агенту: перепроверить, действительно ли Telegram сервер получает и обрабатывает `setAuthenticationPhoneNumber`/`resendAuthenticationCode` на живом номере (по логам и фактической доставке кода).
-- [x] Следующему агенту: проверить, не возвращается ли `authenticationCodeTypeFirebaseIos` и нужно ли отдельное поведение для него.
-- [x] Следующему агенту: подтвердить UX/тексты и оставить только нужные изменения.
+- [x] Следующий этап: перепроверить, действительно ли Telegram сервер получает и обрабатывает `setAuthenticationPhoneNumber`/`resendAuthenticationCode` на живом номере (по логам и фактической доставке кода).
+- [x] Следующий этап: проверить, не возвращается ли `authenticationCodeTypeFirebaseIos` и нужно ли отдельное поведение для него.
+- [x] Следующий этап: подтвердить UX/тексты и оставить только нужные изменения.
 
 ---
 
@@ -690,3 +690,32 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] FINDING 10: Replace force-unwrap on FileManager URLs -- CONFIRMED, fixed
 - [x] FINDING 11: Pass actual pushTimeout for Firebase countdown -- CONFIRMED, fixed
 - [x] FINDING 12: Add Firebase fallback note to README -- CONFIRMED, fixed
+
+---
+
+## Additional Review Fixes (2026-03-05)
+
+- [x] FINDING 1: Race condition in auth bootstrap - AsyncStream continuation registered asynchronously in Task, could miss initial TDLib update -- CONFIRMED, fixed (create stream synchronously before Task)
+- [x] FINDING 2: Error-handling gap in setParameters() - silently returns on guard failures instead of throwing -- CONFIRMED, fixed (added TDLibServiceError enum, throw on failure)
+- [x] FINDING 3: Logic regression in resend gating - 30s fallback for timeout<=0 delays valid immediate resend -- CONFIRMED (partially), fixed (allow immediate canResendCode when timeout<=0)
+- [x] FINDING 4: Race condition in resend flow - manual resend and Firebase auto-resend not coordinated -- CONFIRMED, fixed (cancel firebaseResendTask in resendCode and reportCodeMissingAndResend)
+
+---
+
+## Bug 4: Intercept t.me links in message cards (2026-03-05)
+
+- [x] Step 1: FormattedTextView — add `onTelegramLinkTap` callback + `isTelegramLink` helper
+- [x] Step 2: FeedCardView — add `onPostLinkTap` parameter, pass to FormattedTextView
+- [x] Step 3: FeedView — wire `onPostLinkTap` to open ChannelSheetView with parsed message ID
+
+---
+
+## Feed Stability Log (2026-03-06)
+
+- [x] ChannelSheet: initial open now resolves the visible cell by exact `messageId` and scrolls to that cell instead of replacing the target with a fallback neighbor.
+- [x] ChannelSheet: each rendered card now exposes scroll anchors for every represented Telegram `messageId`, so opening a post scrolls by the exact tapped ID rather than by a derived card position.
+- [x] ChannelSheet/FeedView: removed the extra manual `scrollPosition` reassignment after `scrollTo`, which had been causing a second snap below the target message.
+- [x] FeedView: scroll restoration now goes through one programmatic scroll pipeline; saved position is preserved on relaunch, and channel toggles keep the nearest surviving message instead of jumping to the bottom.
+- [x] Feed FAB: the down button now uses the same explicit scroll request flow and returns to the newest loaded message.
+- [x] Launch screen: added `LaunchScreen.storyboard` with a simple static title/subtitle composition for app startup.
+- [x] Verification: `xcodebuild -project TFeed.xcodeproj -scheme TFeed -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` succeeded on 2026-03-06.

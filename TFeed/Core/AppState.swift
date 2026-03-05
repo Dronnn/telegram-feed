@@ -17,9 +17,10 @@ final class AppState {
 
     func startListening() {
         listenTask?.cancel()
+        let router = TDLibService.shared.updateRouter
+        let stream = router.updates()
         listenTask = Task {
-            let router = TDLibService.shared.updateRouter
-            for await update in router.updates() {
+            for await update in stream {
                 guard !Task.isCancelled else { break }
                 if case .updateAuthorizationState(let state) = update {
                     switch state.authorizationState {

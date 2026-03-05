@@ -3,12 +3,14 @@ import SwiftUI
 struct ChannelSheetView: View {
     let channelInfo: ChannelInfo
     let initialMessageId: FeedItemID?
+
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChannelViewModel
     @State private var scrollPosition: FeedItemID?
     @State private var pendingInitialMessageID: FeedItemID?
-    @State private var requestedScrollTarget: FeedItemID?
-    @State private var hasScheduledInitialPlacement = false
+    @State private var pendingScrollRequest: ChannelScrollRequest?
+    @State private var didScheduleInitialPlacement = false
+    @State private var isPerformingProgrammaticScroll = false
 
     init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil) {
         self.channelInfo = channelInfo
@@ -50,8 +52,9 @@ struct ChannelSheetView: View {
         .presentationDragIndicator(.visible)
         .task {
             pendingInitialMessageID = initialMessageId
-            requestedScrollTarget = nil
-            hasScheduledInitialPlacement = false
+            pendingScrollRequest = nil
+            didScheduleInitialPlacement = false
+            isPerformingProgrammaticScroll = false
             scrollPosition = nil
             await viewModel.load(aroundMessageId: initialMessageId?.messageId)
             restoreInitialScrollIfPossible()
@@ -82,9 +85,8 @@ struct ChannelSheetView: View {
                     }
 
                     ForEach(viewModel.items) { item in
-                        channelCard(item: item)
+                        channelRow(item: item)
                             .padding(.horizontal, 16)
-                            .id(item.id)
                     }
 
                     if viewModel.isLoadingNewer {
@@ -102,28 +104,47 @@ struct ChannelSheetView: View {
             .scrollEdgeEffectStyle(.soft, for: .all)
             .onChange(of: scrollPosition) { _, newValue in
                 guard let pos = newValue else { return }
-                if let first = viewModel.items.first, pos == first.id, !viewModel.hasReachedOldest {
+                guard !isPerformingProgrammaticScroll else { return }
+
+                if let first = viewModel.items.first, first.matches(pos), !viewModel.hasReachedOldest {
                     Task { await viewModel.loadOlder() }
                 }
-                if let last = viewModel.items.last, pos == last.id, !viewModel.hasReachedNewest {
+                if let last = viewModel.items.last, last.matches(pos), !viewModel.hasReachedNewest {
                     Task { await viewModel.loadNewer() }
                 }
             }
-            .onChange(of: requestedScrollTarget) { _, target in
-                guard let target else { return }
+            .onChange(of: pendingScrollRequest) { _, request in
+                guard let request else { return }
+                let anchor: UnitPoint = request.anchor == .bottom ? .bottom : .top
                 Task { @MainActor in
+                    isPerformingProgrammaticScroll = true
                     await Task.yield()
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        proxy.scrollTo(target, anchor: .top)
+                    guard pendingScrollRequest == request else {
+                        isPerformingProgrammaticScroll = false
+                        return
                     }
-                    scrollPosition = target
+                    proxy.scrollTo(request.target, anchor: anchor)
+                    pendingScrollRequest = nil
                     await Task.yield()
-                    proxy.scrollTo(target, anchor: .top)
-                    scrollPosition = target
-                    requestedScrollTarget = nil
+                    isPerformingProgrammaticScroll = false
                 }
             }
         }
+    }
+
+    private func channelRow(item: FeedItem) -> some View {
+        channelCard(item: item)
+            .background(alignment: .top) {
+                ZStack(alignment: .top) {
+                    ForEach(extraScrollTargets(for: item), id: \.self) { target in
+                        Color.clear
+                            .frame(height: 1)
+                            .opacity(0.001)
+                            .id(target)
+                    }
+                }
+            }
+            .id(item.id)
     }
 
     private func channelCard(item: FeedItem) -> some View {
@@ -150,30 +171,45 @@ struct ChannelSheetView: View {
     }
 
     private func restoreInitialScrollIfPossible() {
-        guard requestedScrollTarget == nil else { return }
+        guard pendingScrollRequest == nil, !isPerformingProgrammaticScroll else { return }
 
         if let pendingInitialMessageID {
-            if let target = viewModel.items.first(where: { $0.matches(pendingInitialMessageID) }) {
-                self.pendingInitialMessageID = nil
-                hasScheduledInitialPlacement = true
-                requestScroll(to: target.id)
-                return
-            }
-
-            if viewModel.isLoading {
-                return
-            }
-
-            self.pendingInitialMessageID = nil
+            guard containsScrollableTarget(for: pendingInitialMessageID) else { return }
+            didScheduleInitialPlacement = true
+            requestScroll(to: pendingInitialMessageID, anchor: .top)
+            return
         }
 
-        guard !hasScheduledInitialPlacement, scrollPosition == nil, let last = viewModel.items.last else { return }
-        hasScheduledInitialPlacement = true
-        requestScroll(to: last.id)
+        guard !didScheduleInitialPlacement, scrollPosition == nil, let last = viewModel.items.last else { return }
+        didScheduleInitialPlacement = true
+        requestScroll(to: last.id, anchor: .bottom)
     }
 
-    private func requestScroll(to target: FeedItemID) {
-        guard requestedScrollTarget != target else { return }
-        requestedScrollTarget = target
+    private func requestScroll(to target: FeedItemID, anchor: ChannelScrollRequest.Anchor) {
+        pendingScrollRequest = ChannelScrollRequest(target: target, anchor: anchor)
+        if pendingInitialMessageID == target {
+            self.pendingInitialMessageID = nil
+        }
     }
+
+    private func containsScrollableTarget(for target: FeedItemID) -> Bool {
+        viewModel.items.contains(where: { $0.matches(target) })
+    }
+
+    private func extraScrollTargets(for item: FeedItem) -> [FeedItemID] {
+        item.representedMessageIds.compactMap { messageId in
+            guard messageId != item.messageId else { return nil }
+            return FeedItemID(chatId: item.chatId, messageId: messageId)
+        }
+    }
+}
+
+private struct ChannelScrollRequest: Equatable {
+    enum Anchor: Equatable {
+        case top
+        case bottom
+    }
+
+    let target: FeedItemID
+    let anchor: Anchor
 }
