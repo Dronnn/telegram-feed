@@ -122,7 +122,7 @@ struct AuthView: View {
             errorLabel
                 .padding(.horizontal, 40)
 
-            if viewModel.canResendCode {
+            if viewModel.canResendCode, viewModel.hasNextCodeType {
                 Button("Resend code") {
                     viewModel.resendCode()
                 }

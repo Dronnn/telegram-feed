@@ -2,6 +2,12 @@ import Foundation
 import TDLibKit
 import UIKit
 
+#if DEBUG
+private func debugLog(_ message: @autoclosure () -> String) { print(message()) }
+#else
+@inline(__always) private func debugLog(_ message: @autoclosure () -> String) {}
+#endif
+
 extension TDLibClient: @retroactive @unchecked Sendable {}
 extension TDLibClientManager: @retroactive @unchecked Sendable {}
 extension Chat: @retroactive @unchecked Sendable {}
@@ -86,26 +92,26 @@ actor TDLibService {
 
     func sendPhoneNumber(_ phoneNumber: String) async throws {
         guard let client else { return }
-        print("[TDLib Auth] Sending phone number")
+        debugLog("[TDLib Auth] Sending phone number")
         try await client.setAuthenticationPhoneNumber(
             phoneNumber: phoneNumber,
             settings: nil
         )
-        print("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
+        debugLog("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
     }
 
     func resendAuthenticationCode(reason: ResendCodeReason = .resendCodeReasonUserRequest) async throws {
         guard let client else { return }
-        print("[TDLib Auth] Resending authentication code, reason: \(reason)")
+        debugLog("[TDLib Auth] Resending authentication code, reason: \(reason)")
         _ = try await client.resendAuthenticationCode(reason: reason)
-        print("[TDLib Auth] resendAuthenticationCode succeeded")
+        debugLog("[TDLib Auth] resendAuthenticationCode succeeded")
     }
 
     func reportAuthenticationCodeMissing() async throws {
         guard let client else { return }
-        print("[TDLib Auth] Reporting authentication code missing")
+        debugLog("[TDLib Auth] Reporting authentication code missing")
         try await client.reportAuthenticationCodeMissing(mobileNetworkCode: nil)
-        print("[TDLib Auth] reportAuthenticationCodeMissing succeeded")
+        debugLog("[TDLib Auth] reportAuthenticationCodeMissing succeeded")
     }
 
     func sendCode(_ code: String) async throws {

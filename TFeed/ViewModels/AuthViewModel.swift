@@ -1,6 +1,12 @@
 import Foundation
 import TDLibKit
 
+#if DEBUG
+private func debugLog(_ message: @autoclosure () -> String) { print(message()) }
+#else
+@inline(__always) private func debugLog(_ message: @autoclosure () -> String) {}
+#endif
+
 @MainActor
 @Observable
 final class AuthViewModel {
@@ -15,6 +21,7 @@ final class AuthViewModel {
     var codeDeliveryDescription: String?
     var canResendCode: Bool = false
     var resendCountdown: Int = 0
+    var hasNextCodeType: Bool { codeInfo?.nextType != nil }
 
     private var isStarted = false
     private var updateTask: Task<Void, Never>?
@@ -52,9 +59,9 @@ final class AuthViewModel {
             errorMessage = nil
             isLoading = false
             codeDeliveryDescription = describeCodeType(info.codeInfo.type)
-            print("[Auth] Code info - type: \(info.codeInfo.type), timeout: \(info.codeInfo.timeout)s, nextType: \(String(describing: info.codeInfo.nextType))")
+            debugLog("[Auth] Code info - type: \(info.codeInfo.type), timeout: \(info.codeInfo.timeout)s, nextType: \(String(describing: info.codeInfo.nextType))")
             if case .authenticationCodeTypeFirebaseIos(let fbInfo) = info.codeInfo.type {
-                print("[Auth] Firebase iOS code type received - pushTimeout: \(fbInfo.pushTimeout)s, length: \(fbInfo.length)")
+                debugLog("[Auth] Firebase iOS code type received - pushTimeout: \(fbInfo.pushTimeout)s, length: \(fbInfo.length)")
             }
             let countdownTimeout: Int
             if case .authenticationCodeTypeFirebaseIos(let fbInfo) = info.codeInfo.type, info.codeInfo.timeout == 0 {
@@ -91,7 +98,7 @@ final class AuthViewModel {
                 try await TDLibService.shared.sendPhoneNumber(trimmed)
             } catch {
                 errorMessage = describeError(error)
-                print("[Auth] sendPhoneNumber failed: \(error)")
+                debugLog("[Auth] sendPhoneNumber failed: \(error)")
             }
             isLoading = false
         }
@@ -110,7 +117,7 @@ final class AuthViewModel {
                 try await TDLibService.shared.sendCode(trimmed)
             } catch {
                 errorMessage = describeError(error)
-                print("[Auth] sendCode failed: \(error)")
+                debugLog("[Auth] sendCode failed: \(error)")
             }
             isLoading = false
         }
@@ -128,7 +135,7 @@ final class AuthViewModel {
                 try await TDLibService.shared.sendPassword(password)
             } catch {
                 errorMessage = describeError(error)
-                print("[Auth] sendPassword failed: \(error)")
+                debugLog("[Auth] sendPassword failed: \(error)")
             }
             isLoading = false
         }
@@ -143,7 +150,7 @@ final class AuthViewModel {
                 try await TDLibService.shared.resendAuthenticationCode()
             } catch {
                 errorMessage = describeError(error)
-                print("[Auth] resendAuthenticationCode failed: \(error)")
+                debugLog("[Auth] resendAuthenticationCode failed: \(error)")
             }
             isLoading = false
         }
@@ -157,13 +164,13 @@ final class AuthViewModel {
             do {
                 try await TDLibService.shared.reportAuthenticationCodeMissing()
             } catch {
-                print("[Auth] reportAuthenticationCodeMissing failed: \(error)")
+                debugLog("[Auth] reportAuthenticationCodeMissing failed: \(error)")
             }
             do {
                 try await TDLibService.shared.resendAuthenticationCode()
             } catch {
                 errorMessage = describeError(error)
-                print("[Auth] resendAuthenticationCode failed: \(error)")
+                debugLog("[Auth] resendAuthenticationCode failed: \(error)")
             }
             isLoading = false
         }
@@ -193,25 +200,25 @@ final class AuthViewModel {
         firebaseResendTask?.cancel()
         guard case .authenticationCodeTypeFirebaseIos(let info) = codeType else { return }
         guard firebaseResendAttempts < 2 else {
-            print("[Auth] Firebase auto-resend exhausted (\(firebaseResendAttempts) attempts). User must resend manually.")
+            debugLog("[Auth] Firebase auto-resend exhausted (\(firebaseResendAttempts) attempts). User must resend manually.")
             return
         }
         firebaseResendAttempts += 1
 
-        print("[Auth] Firebase iOS detected without Firebase SDK. Will auto-resend after \(info.pushTimeout)s to trigger SMS fallback (attempt \(firebaseResendAttempts)/2).")
+        debugLog("[Auth] Firebase iOS detected without Firebase SDK. Will auto-resend after \(info.pushTimeout)s to trigger SMS fallback (attempt \(firebaseResendAttempts)/2).")
         let timeout = max(Int(info.pushTimeout), 3)
 
         firebaseResendTask = Task {
             try? await Task.sleep(for: .seconds(timeout))
             guard !Task.isCancelled else { return }
-            print("[Auth] Firebase push timeout elapsed, auto-resending with verification failed reason")
+            debugLog("[Auth] Firebase push timeout elapsed, auto-resending with verification failed reason")
             do {
                 let reason = ResendCodeReason.resendCodeReasonVerificationFailed(
                     ResendCodeReasonVerificationFailed(errorMessage: "APNS_RECEIVE_TIMEOUT")
                 )
                 try await TDLibService.shared.resendAuthenticationCode(reason: reason)
             } catch {
-                print("[Auth] Firebase auto-resend failed: \(error), trying reportAuthenticationCodeMissing")
+                debugLog("[Auth] Firebase auto-resend failed: \(error), trying reportAuthenticationCodeMissing")
                 try? await TDLibService.shared.reportAuthenticationCodeMissing()
             }
         }
