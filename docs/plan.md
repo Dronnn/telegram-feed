@@ -615,11 +615,11 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] Сохранение/восстановление scroll position
 
 ### Фаза 6: Канал и настройки
-- [ ] `ChannelViewModel` + `ChannelSheetView` — single channel view
-- [ ] `SettingsViewModel` + `SettingsView` — channel toggles, search
-- [ ] «Clear Local Cache» + confirmation dialog
-- [ ] «Log Out» + confirmation dialog + TDLib logout
-- [ ] Persist selected channel IDs в SwiftData (`SelectedChannel` @Model)
+- [x] `ChannelViewModel` + `ChannelSheetView` — single channel view
+- [x] `SettingsViewModel` + `SettingsView` — channel toggles, search
+- [x] «Clear Local Cache» + confirmation dialog
+- [x] «Log Out» + confirmation dialog + TDLib logout
+- [x] Persist selected channel IDs в SwiftData (`SelectedChannel` @Model)
 
 ### Фаза 7: Polish и GitHub
 - [ ] Liquid Glass materials на карточках, toolbar, FAB
