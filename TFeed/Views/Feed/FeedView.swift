@@ -146,12 +146,18 @@ struct FeedView: View {
                 }
 
                 ForEach(viewModel.items) { item in
-                    FeedCardView(item: item) {
+                    FeedCardView(item: item, onChannelTap: {
                         if let channel = viewModel.channels[item.chatId] {
                             selectedMessageId = item.id
                             selectedChannel = channel
                         }
-                    }
+                    }, onPostLinkTap: { url in
+                        if let channel = viewModel.channels[item.chatId] {
+                            let messageId = parseTelegramMessageId(from: url, fallback: item.messageId)
+                            selectedMessageId = FeedItemID(chatId: item.chatId, messageId: messageId)
+                            selectedChannel = channel
+                        }
+                    })
                     .padding(.horizontal, 16)
                 }
             }
@@ -204,5 +210,17 @@ struct FeedView: View {
         }
         .buttonStyle(.plain)
         .transition(.scale.combined(with: .opacity))
+    }
+
+    private func parseTelegramMessageId(from url: URL, fallback: Int64) -> Int64 {
+        let components = url.pathComponents.filter { $0 != "/" }
+        // t.me/channelname/12345 -> components = ["channelname", "12345"]
+        guard components.count >= 2,
+              let serverMessageId = Int64(components.last ?? "") else {
+            return fallback
+        }
+        // TDLib message IDs for channels = server_message_id << 20
+        let tdlibMessageId = serverMessageId << 20
+        return tdlibMessageId
     }
 }

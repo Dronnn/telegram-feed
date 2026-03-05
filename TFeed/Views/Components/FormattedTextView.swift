@@ -3,6 +3,7 @@ import TDLibKit
 
 struct FormattedTextView: View {
     let formattedText: FormattedText
+    var onTelegramLinkTap: ((URL) -> Void)? = nil
     @State private var revealedSpoilers: Set<Int> = []
 
     var body: some View {
@@ -12,6 +13,10 @@ struct FormattedTextView: View {
             .environment(\.openURL, OpenURLAction { url in
                 if url.scheme == "spoiler", let index = Int(url.host() ?? "") {
                     revealedSpoilers.insert(index)
+                    return .handled
+                }
+                if isTelegramLink(url), let onTelegramLinkTap {
+                    onTelegramLinkTap(url)
                     return .handled
                 }
                 return .systemAction
@@ -99,5 +104,10 @@ struct FormattedTextView: View {
         }
 
         return attributed
+    }
+
+    private func isTelegramLink(_ url: URL) -> Bool {
+        let host = url.host()?.lowercased() ?? ""
+        return host == "t.me" || host == "telegram.me" || host == "telegram.dog"
     }
 }

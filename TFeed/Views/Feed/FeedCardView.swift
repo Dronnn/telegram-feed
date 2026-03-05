@@ -4,6 +4,7 @@ import TDLibKit
 struct FeedCardView: View {
     let item: FeedItem
     var onChannelTap: (() -> Void)? = nil
+    var onPostLinkTap: ((URL) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -39,7 +40,7 @@ struct FeedCardView: View {
 
             // Text content
             if let formattedText = item.formattedText, !formattedText.text.isEmpty {
-                FormattedTextView(formattedText: formattedText)
+                FormattedTextView(formattedText: formattedText, onTelegramLinkTap: onPostLinkTap)
             }
 
             // Media
