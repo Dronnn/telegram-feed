@@ -20,6 +20,9 @@ struct SettingsView: View {
                 securitySection
                 accountSection
             }
+            .refreshable {
+                await viewModel.refreshChannels()
+            }
             .listStyle(.insetGrouped)
             .searchable(text: $viewModel.searchText, prompt: "Search channels...")
             .navigationTitle("Settings")

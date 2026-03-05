@@ -49,7 +49,7 @@
 ## Шаги
 
 - [x] Bug 1: Добавить empty state в SettingsView для пустого списка каналов
-- [ ] Bug 2: Добавить pull-to-refresh в секцию Channels в SettingsView для обновления списка каналов
+- [x] Bug 2: Добавить pull-to-refresh в секцию Channels в SettingsView для обновления списка каналов
 - [ ] Bug 3: Обновление ленты при возврате из Settings с сохранением scroll position
 - [ ] Bug 4: Ссылка на пост (добавленная приложением) → открывать ChannelSheet с проскролом к сообщению
 - [ ] Bug 5: ChannelSheet — загружать все сообщения канала, проскролить к нужному, бесконечный скролл
