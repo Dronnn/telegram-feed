@@ -235,3 +235,27 @@ starting task execution phase
 - ChannelSheetView receives both and loads messages around the target
 - ChannelViewModel handles aroundMessageId correctly
 - Result: All parameters pass correctly end-to-end. No code changes needed.
+[26-03-06 10:39:49] Step 7 is complete. The remaining unchecked sections are Steps 8 through 13, which all still have [ ] checkboxes.
+[26-03-06 10:39:49] Stopping here - the external loop will call again for Step 8.
+
+--- task iteration 8 ---
+[26-03-06 10:40:11] STEP 0 - ANNOUNCE:
+[26-03-06 10:40:11] Task: Step 8 - Rework ChannelSheet - Target Message in Center
+[26-03-06 10:40:11] This task has 3 checkboxes (8.1, 8.2, 8.3) that rework how ChannelSheetView opens and displays messages:
+[26-03-06 10:40:11]   - 8.1: Change scroll anchor from .top to .center so the tapped message appears in the center of the screen
+[26-03-06 10:40:11]   - 8.2: Eliminate jerks when opening - load messages BEFORE showing content (show loading indicator while loading, then display list already scrolled to the
+[26-03-06 10:40:11] correct position)
+[26-03-06 10:40:11]   - 8.3: Guarantee chronological order in ChannelSheet (old at top, new at bottom)
+[26-03-06 10:40:11] Key files: TFeed/Views/Channel/ChannelSheetView.swift, TFeed/ViewModels/ChannelViewModel.swift
+[26-03-06 10:40:11] Let me start by reading the current implementation of both files.
+[26-03-06 10:41:45] Now I have a clear picture of both files. Let me delegate the implementation.
+[26-03-06 10:43:12] Build succeeded. Let me verify the final file and then update the plan + commit.
+[26-03-06 10:43:16] The file looks clean and correct. Now let me update the plan checkboxes and commit.
+[26-03-06 10:43:28] Now update the progress log and commit.
+[26-03-06 10:43:40] Step 8 complete. All 3 checkboxes done. Changes to ChannelSheetView.swift:
+  - 8.1: Changed .scrollPosition(id:) to .scrollPosition(id:, anchor: .center) so target message appears at center of screen
+  - 8.2: Replaced complex ScrollViewReader/proxy.scrollTo approach with simpler isContentReady gate: show ProgressView while loading, set scrollPosition before revealing list. Removed: pendingScrollRequest, isPerformingProgrammaticScroll, didScheduleInitialPlacement, ChannelScrollRequest struct, restoreInitialScrollIfPossible, requestScroll, containsScrollableTarget methods
+  - 8.3: Chronological order verified - ChannelViewModel.normalizeItems() sorts using FeedItem.Comparable (by date), guaranteed old-at-top new-at-bottom
+  - Edge loading changed from first/last element matching to index-based threshold (within 5 items of edge)
+  - No changes needed to ChannelViewModel.swift
+[26-03-06 10:43:40] Remaining unchecked: Steps 9-13. Stopping here for next iteration.

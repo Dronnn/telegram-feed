@@ -367,7 +367,7 @@ The basic logic already works, but needs adaptation to the new model:
 
 ### Step 8: Rework ChannelSheet — Target Message in Center
 
-- [ ] 8.1: Change anchor from `.top` to `.center`
+- [x] 8.1: Change anchor from `.top` to `.center`
 
 **Current state:** `ChannelSheetView` loads a window of ~50 messages around the target via `fetchWindow()` on open. Then tries to scroll to the target message with anchor `.top`. In practice this is unstable: on opening, the screen shows the top of the list, then starts jerking, jumping, loading, and ultimately the target message is impossible to find.
 
@@ -383,14 +383,14 @@ The basic logic already works, but needs adaptation to the new model:
 
 5. **Above the target message** — all older messages from this channel. Load ~30 older messages (same as the main screen buffer), plus infinite loading on scroll up (Step 9).
 
-- [ ] 8.2: Eliminate jerks when opening ChannelSheet
+- [x] 8.2: Eliminate jerks when opening ChannelSheet
 
 **No jerks or jumping when opening the sheet.** User taps — sheet slides up — target message is immediately in the center — everything is stable. To achieve this:
 - Load messages BEFORE showing content (while loading — show a loading indicator)
 - When messages are loaded — show the list already scrolled to the target message
 - Do not show the list empty and then scroll — show it in the correct position from the start
 
-- [ ] 8.3: Guarantee chronological order in ChannelSheet
+- [x] 8.3: Guarantee chronological order in ChannelSheet
 
 Messages are displayed chronologically: old at top, new at bottom — same as in the main feed.
 
