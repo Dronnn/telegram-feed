@@ -181,11 +181,11 @@ Test scenarios:
 
 ### Step 2: Buffer of 30 Messages Above (Total Across All Channels)
 
-- [ ] 2.1: Extract buffer size into a constant
+- [x] 2.1: Extract buffer size into a constant
 
 The number 30 must be extracted into a constant (e.g., `static let upwardBufferSize = 30`) so it can easily be changed to 10 or 15.
 
-- [ ] 2.2: Implement threshold-based loading instead of edge-based
+- [x] 2.2: Implement threshold-based loading instead of edge-based
 
 **Current state:** `loadOlder()` loads up to 30 messages *per channel* when scrolling to the first element. So if 10 channels are selected, up to 300 messages get loaded. Loading triggers only when reaching the very first element in the list.
 
@@ -201,11 +201,11 @@ Above the currently visible message there must always be exactly ~30 messages fr
 
 4. Loading triggers **not when reaching the first element**, but **when the number of elements above the current position changes**. A threshold is needed: if the count of elements above current < 30, trigger loading.
 
-- [ ] 2.3: Implement loading from all channels combined
+- [x] 2.3: Implement loading from all channels combined
 
 For loading: request messages older than the oldest loaded message from all channels. Collect responses into a single array, sort, take the needed count (30 - current buffer).
 
-- [ ] 2.4: No jerks during loading (see Step 1)
+- [x] 2.4: No jerks during loading (see Step 1)
 
 The currently visible message stays in place. New messages are added above, but the screen doesn't scroll or jump.
 

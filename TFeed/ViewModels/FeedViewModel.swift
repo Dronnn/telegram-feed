@@ -20,8 +20,8 @@ final class FeedViewModel {
     private var bufferedIncomingMessages: [Message] = []
 
     private let initialLoadLimit = 30
-    private let paginationLimit = 30
     private let restoreBackfillLimit = 100
+    static let upwardBufferSize = 30
 
     // MARK: - Public
 
@@ -88,13 +88,24 @@ final class FeedViewModel {
         }
     }
 
-    func loadOlder() async {
+    func loadOlderIfNeeded(currentPosition: FeedItemID?) async {
+        guard let currentPosition else { return }
+        let itemsAbove = items.firstIndex(where: { $0.id == currentPosition }) ?? 0
+        let deficit = Self.upwardBufferSize - itemsAbove
+        guard deficit > 0 else { return }
+        await loadOlder(deficit: deficit)
+    }
+
+    private func loadOlder(deficit: Int) async {
         guard !isLoadingMore, !activeChannelIDs.isEmpty else { return }
         isLoadingMore = true
         defer { isLoadingMore = false }
 
         let activeIDs = activeChannelIDs.subtracting(channelsWithFullHistoryLoaded)
         guard !activeIDs.isEmpty else { return }
+
+        let numChannels = max(activeIDs.count, 1)
+        let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
 
         var olderMessagesByChannel: [Int64: [Message]] = [:]
 
@@ -105,7 +116,7 @@ final class FeedViewModel {
                     let messages = await self.fetchMessages(
                         chatId: chatId,
                         fromMessageId: fromMessageId,
-                        limit: self.paginationLimit
+                        limit: perChannelLimit
                     )
                     return (chatId, messages)
                 }

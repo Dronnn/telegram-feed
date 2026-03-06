@@ -209,9 +209,7 @@ struct FeedView: View {
                 viewModel.updateScrollPosition(newValue)
 
                 guard let pos = newValue, !isPerformingProgrammaticScroll else { return }
-                if let first = viewModel.items.first, pos == first.id {
-                    Task { await viewModel.loadOlder() }
-                }
+                Task { await viewModel.loadOlderIfNeeded(currentPosition: pos) }
             }
             .onChange(of: pendingScrollRequest) { _, request in
                 guard let request else { return }
