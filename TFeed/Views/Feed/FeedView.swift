@@ -9,6 +9,7 @@ struct FeedView: View {
     @State private var viewModel = FeedViewModel()
     @State private var scrollPosition = ScrollPosition(idType: FeedItemID.self)
     @State private var isContentReady = false
+    @State private var initialScrollAnchor: UnitPoint = .center
     @State private var viewportAnchorID: FeedItemID?
     @State private var readingAnchorID: FeedItemID?
     @State private var lastVisiblePosition: FeedItemID?
@@ -132,6 +133,7 @@ struct FeedView: View {
             viewportAnchorID = resolved
             readingAnchorID = resolved
             lastVisiblePosition = resolved
+            initialScrollAnchor = .center
             return
         }
 
@@ -142,11 +144,13 @@ struct FeedView: View {
             viewportAnchorID = resolved
             readingAnchorID = resolved
             lastVisiblePosition = resolved
+            initialScrollAnchor = .center
         } else if let newest = viewModel.items.last {
             scrollPosition = ScrollPosition(id: newest.id, anchor: .bottom)
             viewportAnchorID = newest.id
             readingAnchorID = newest.id
             lastVisiblePosition = newest.id
+            initialScrollAnchor = .bottom
         } else {
             scrollPosition = ScrollPosition(idType: FeedItemID.self)
         }
@@ -226,7 +230,6 @@ struct FeedView: View {
             }
         }
         .scrollPosition($scrollPosition)
-        .defaultScrollAnchor(.center)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .scrollContentBackground(.hidden)
         .listStyle(.plain)
@@ -240,6 +243,11 @@ struct FeedView: View {
             if viewModel.isLoadingMore {
                 loadingOverlay
                     .padding(.top, 8)
+            }
+        }
+        .onAppear {
+            if let target = viewportAnchorID {
+                scrollPosition.scrollTo(id: target, anchor: initialScrollAnchor)
             }
         }
         .onScrollPhaseChange { _, newPhase in
