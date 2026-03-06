@@ -97,12 +97,17 @@ struct ChannelSheetView: View {
         .scrollPosition(id: $scrollPosition, anchor: .center)
         .scrollEdgeEffectStyle(.soft, for: .all)
         .onChange(of: scrollPosition) { _, newValue in
-            guard let pos = newValue,
-                  let idx = viewModel.items.firstIndex(where: { $0.matches(pos) }) else { return }
-            if idx <= 5, !viewModel.hasReachedOldest {
-                Task { await viewModel.loadOlder() }
-            }
-            if idx >= viewModel.items.count - 5, !viewModel.hasReachedNewest {
+            guard let pos = newValue else { return }
+
+            // Threshold-based upward loading
+            Task { await viewModel.loadOlderIfNeeded(currentPosition: pos) }
+
+            // Trim excess items above
+            viewModel.trimTopIfNeeded(currentPosition: pos)
+
+            // Load newer when near bottom
+            if let idx = viewModel.items.firstIndex(where: { $0.matches(pos) }),
+               idx >= viewModel.items.count - 5, !viewModel.hasReachedNewest {
                 Task { await viewModel.loadNewer() }
             }
         }

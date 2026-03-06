@@ -13,6 +13,8 @@ final class ChannelViewModel {
 
     let channelInfo: ChannelInfo
 
+    static let upwardBufferSize = 30
+
     private let initialWindow = 50
     private let pageSize = 30
 
@@ -55,15 +57,33 @@ final class ChannelViewModel {
         items = normalizeItems(mappedItems)
     }
 
-    func loadOlder() async {
+    func loadOlderIfNeeded(currentPosition: FeedItemID?) async {
+        guard let currentPosition else { return }
+        let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) ?? 0
+        let deficit = Self.upwardBufferSize - itemsAbove
+        guard deficit > 0 else { return }
+        await loadOlderByDeficit(deficit)
+    }
+
+    func trimTopIfNeeded(currentPosition: FeedItemID?) {
+        guard let currentPosition,
+              let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
+        let excess = currentIndex - Self.upwardBufferSize
+        guard excess > 0 else { return }
+        items.removeFirst(excess)
+        hasReachedOldest = false
+    }
+
+    private func loadOlderByDeficit(_ deficit: Int) async {
         guard !isLoadingOlder, !hasReachedOldest, let oldest = items.first else { return }
         isLoadingOlder = true
         defer { isLoadingOlder = false }
 
         let oldestMessageID = oldest.representedMessageIds.min() ?? oldest.messageId
+        let fetchLimit = max(deficit, pageSize)
         let messages = await fetchHistory(
             fromMessageId: oldestMessageID,
-            limit: pageSize
+            limit: fetchLimit
         )
 
         if messages.isEmpty || messages.count <= 1 {

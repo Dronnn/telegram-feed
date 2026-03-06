@@ -402,7 +402,7 @@ Messages are displayed chronologically: old at top, new at bottom — same as in
 
 ### Step 9: Infinite Upward Scroll in ChannelSheet
 
-- [ ] 9.1: Implement threshold-based loading in ChannelSheet
+- [x] 9.1: Implement threshold-based loading in ChannelSheet
 
 **Current state:** `ChannelViewModel.loadOlder()` loads 30 messages when reaching the first element. `ChannelViewModel.loadNewer()` — when reaching the last. Bidirectional scroll is implemented but jerky.
 
