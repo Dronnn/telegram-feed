@@ -100,7 +100,7 @@ struct FeedItem: Identifiable, Sendable, Comparable {
 
         return FeedItem(
             chatId: chatId,
-            messageId: max(messageId, other.messageId),
+            messageId: messageId,
             date: max(date, other.date),
             formattedText: mergedText,
             channelTitle: channelTitle.isEmpty ? other.channelTitle : channelTitle,

@@ -144,7 +144,7 @@ final class FeedViewModel {
         }
 
         if !additions.isEmpty {
-            items = normalizeItems(items + additions)
+            insertItemsMerged(additions)
         }
     }
 
@@ -204,13 +204,7 @@ final class FeedViewModel {
             }
 
             if !added.isEmpty {
-                let existingMessageIDs = representedMessageIDs(in: items, chatId: nil)
-                let unique = added.filter { item in
-                    item.representedMessageIds.allSatisfy {
-                        !existingMessageIDs.contains(FeedItemID(chatId: item.chatId, messageId: $0))
-                    }
-                }
-                items = normalizeItems(items + unique)
+                insertItemsMerged(added)
             }
         }
 
@@ -442,7 +436,14 @@ final class FeedViewModel {
         }
 
         let existingDisplayTarget = items.first(where: { $0.matches(item.id) })?.id
-        items = normalizeItems(items + [item])
+
+        if let albumId = item.mediaAlbumId,
+           let existingIndex = items.lastIndex(where: { $0.chatId == item.chatId && $0.mediaAlbumId == albumId }) {
+            items[existingIndex] = mergeAlbumItems(items[existingIndex], item)
+        } else {
+            items.append(item)
+        }
+
         let displayTarget = items.first(where: { $0.matches(item.id) })?.id ?? item.id
         let insertedNewCard = existingDisplayTarget == nil
 
@@ -459,9 +460,10 @@ final class FeedViewModel {
     private func applyBufferedIncomingMessages() {
         let pending = bufferedIncomingMessages
         bufferedIncomingMessages.removeAll()
-        for message in pending.sorted(by: { $0.id < $1.id }) {
-            applyIncomingMessage(message, allowBuffering: false)
-        }
+        guard !pending.isEmpty else { return }
+        let sorted = pending.sorted(by: { $0.id < $1.id })
+        let newItems = sorted.map { makeItem(from: $0) }
+        insertItemsMerged(newItems)
     }
 
     private func makeItem(from message: Message) -> FeedItem {
@@ -486,6 +488,28 @@ final class FeedViewModel {
         normalizeItems(messages.map { makeItem(from: $0) })
     }
 
+    private func insertItemsMerged(_ newItems: [FeedItem]) {
+        guard !newItems.isEmpty else { return }
+
+        let existingIDs = representedMessageIDs(in: items, chatId: nil)
+
+        for newItem in newItems {
+            let isDuplicate = newItem.representedMessageIds.allSatisfy {
+                existingIDs.contains(FeedItemID(chatId: newItem.chatId, messageId: $0))
+            }
+            guard !isDuplicate else { continue }
+
+            if let albumId = newItem.mediaAlbumId,
+               let existingIndex = items.lastIndex(where: { $0.chatId == newItem.chatId && $0.mediaAlbumId == albumId }) {
+                items[existingIndex] = mergeAlbumItems(items[existingIndex], newItem)
+                continue
+            }
+
+            let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
+            items.insert(newItem, at: insertionIndex)
+        }
+    }
+
     private func normalizeItems(_ items: [FeedItem]) -> [FeedItem] {
         let sorted = items.sorted()
         var normalized: [FeedItem] = []
@@ -502,7 +526,7 @@ final class FeedViewModel {
                 ? item
                 : FeedItem(
                     chatId: item.chatId,
-                    messageId: unseenRepresentedIDs.max() ?? item.messageId,
+                    messageId: item.messageId,
                     date: item.date,
                     formattedText: item.formattedText,
                     channelTitle: item.channelTitle,
@@ -549,7 +573,7 @@ final class FeedViewModel {
 
         return FeedItem(
             chatId: lhs.chatId,
-            messageId: representedMessageIds.max() ?? lhs.messageId,
+            messageId: lhs.messageId,
             date: max(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,
