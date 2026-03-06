@@ -96,7 +96,7 @@ actor TDLibService {
     // MARK: - Authorization
 
     func sendPhoneNumber(_ phoneNumber: String) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         debugLog("[TDLib Auth] Sending phone number")
         try await client.setAuthenticationPhoneNumber(
             phoneNumber: phoneNumber,
@@ -106,26 +106,26 @@ actor TDLibService {
     }
 
     func resendAuthenticationCode(reason: ResendCodeReason = .resendCodeReasonUserRequest) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         debugLog("[TDLib Auth] Resending authentication code, reason: \(reason)")
         _ = try await client.resendAuthenticationCode(reason: reason)
         debugLog("[TDLib Auth] resendAuthenticationCode succeeded")
     }
 
     func reportAuthenticationCodeMissing() async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         debugLog("[TDLib Auth] Reporting authentication code missing")
         try await client.reportAuthenticationCodeMissing(mobileNetworkCode: nil)
         debugLog("[TDLib Auth] reportAuthenticationCodeMissing succeeded")
     }
 
     func sendCode(_ code: String) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         try await client.checkAuthenticationCode(code: code)
     }
 
     func sendPassword(_ password: String) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         try await client.checkAuthenticationPassword(password: password)
     }
 

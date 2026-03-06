@@ -367,7 +367,6 @@ final class FeedViewModel {
 
     func scrolledToBottom() {
         isAtBottom = true
-        unreadCount = 0
     }
 
     func consumePendingScrollRequest() {

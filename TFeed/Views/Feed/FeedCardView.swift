@@ -79,15 +79,6 @@ struct FeedCardView: View {
     }
 
     private func telegramTarget(from url: URL) -> FeedItemID? {
-        let components = url.pathComponents.filter { $0 != "/" }
-        guard components.count >= 2,
-              let serverMessageId = Int64(components.last ?? "") else {
-            return nil
-        }
-
-        return FeedItemID(
-            chatId: item.chatId,
-            messageId: serverMessageId << 20
-        )
+        nil
     }
 }

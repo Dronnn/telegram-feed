@@ -110,7 +110,7 @@ final class ChannelViewModel {
             return
         }
 
-        items = normalizeItems(items + newItems)
+        insertItemsMerged(newItems)
     }
 
     func loadNewer() async {
@@ -144,7 +144,7 @@ final class ChannelViewModel {
 
         guard !newItems.isEmpty else { return }
 
-        items = normalizeItems(items + newItems)
+        insertItemsMerged(newItems)
     }
 
     func isRead(_ item: FeedItem) -> Bool {
@@ -256,6 +256,28 @@ final class ChannelViewModel {
 
     private func makeItems(from messages: [Message]) -> [FeedItem] {
         normalizeItems(messages.map { makeItem(from: $0) })
+    }
+
+    private func insertItemsMerged(_ newItems: [FeedItem]) {
+        guard !newItems.isEmpty else { return }
+
+        let existingIDs = representedMessageIDs(in: items)
+
+        for newItem in newItems {
+            let isDuplicate = newItem.representedMessageIds.allSatisfy {
+                existingIDs.contains(FeedItemID(chatId: newItem.chatId, messageId: $0))
+            }
+            guard !isDuplicate else { continue }
+
+            if let albumId = newItem.mediaAlbumId,
+               let existingIndex = items.lastIndex(where: { $0.chatId == newItem.chatId && $0.mediaAlbumId == albumId }) {
+                items[existingIndex] = mergeAlbumItems(items[existingIndex], newItem)
+                continue
+            }
+
+            let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
+            items.insert(newItem, at: insertionIndex)
+        }
     }
 
     private func normalizeItems(_ items: [FeedItem]) -> [FeedItem] {
