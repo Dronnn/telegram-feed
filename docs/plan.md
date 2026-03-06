@@ -719,3 +719,40 @@ Push на GitHub пока не делаем — репозиторий на GitH
 - [x] Feed FAB: the down button now uses the same explicit scroll request flow and returns to the newest loaded message.
 - [x] Launch screen: added `LaunchScreen.storyboard` with a simple static title/subtitle composition for app startup.
 - [x] Verification: `xcodebuild -project TFeed.xcodeproj -scheme TFeed -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build` succeeded on 2026-03-06.
+
+---
+
+## Simplify Scroll Position — Use Telegram Read State (2026-03-06)
+
+### Goal
+
+Remove local scroll position storage. Use Telegram's `lastReadInboxMessageId` as the single source of truth for where to resume reading. Each app start: show spinner, load 10 messages before first unread + all messages after, scroll to first unread.
+
+### Flow
+
+```
+App Start → Spinner
+  → Load channels (get lastReadInboxMessageId per channel)
+  → Load latest messages per channel
+  → Find first unread message across all channels
+    (oldest message where messageId > lastReadInboxMessageId for its channel)
+  → Keep 10 items before first unread + all items after
+  → Scroll to first unread → Show feed
+
+During use:
+  → User scrolls and reads messages
+  → Visible messages are marked as read (viewMessages sent to Telegram)
+  → No local position storage
+
+Next start:
+  → Repeat from top (Telegram knows what's read)
+```
+
+### Steps
+
+- [x] 1. Update FeedViewModel.load() — remove restoredPosition, find first unread from Telegram read state, prepareWindow with 10 items before
+- [x] 2. Remove ScrollPositionStore usage from FeedView — no save, no restore, no debug banner
+- [x] 3. Fix visibility tracking — removed ScrollViewReader wrapper from feedContent (likely cause of onScrollTargetVisibilityChange not firing)
+- [x] 4. Fix initial scroll positioning — ScrollPosition(id:anchor:) constructor used before isContentReady gate
+- [x] 5. Fix ChannelSheetView scroll — added backup scrollPosition.scrollTo() after 50ms delay
+- [x] 6. Clean up — build verified, debug overlay removed, ScrollPositionStore left for potential future use

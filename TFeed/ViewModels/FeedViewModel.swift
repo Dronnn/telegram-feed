@@ -32,14 +32,14 @@ final class FeedViewModel {
 
     // MARK: - Public
 
-    func load(selectedIDs: Set<Int64>, restoredPosition: FeedItemID? = nil) async {
+    func load(selectedIDs: Set<Int64>) async {
         guard !isLoading else { return }
         if listeningTask == nil {
             startListening()
         }
         isLoading = true
         errorMessage = nil
-        isAtBottom = (restoredPosition == nil)
+        isAtBottom = false
         defer { isLoading = false }
 
         do {
@@ -52,9 +52,6 @@ final class FeedViewModel {
             channelOldestMessageIDs = [:]
             channelsWithFullHistoryLoaded = []
             deferredOlderItems = []
-            let restoreContext = await loadRestoreContext(
-                for: restoredPosition
-            )
 
             guard !activeIDs.isEmpty else {
                 performStableMutation {
@@ -73,7 +70,7 @@ final class FeedViewModel {
                     group.addTask {
                         await self.loadInitialMessages(
                             chatId: chatId,
-                            restoreContext: restoreContext
+                            restoreContext: nil
                         )
                     }
                 }
@@ -95,32 +92,9 @@ final class FeedViewModel {
             }
             applyBufferedIncomingMessages()
 
-            if restoredPosition == nil {
-                if let targetID = preferredInitialAnchorID(),
-                   let preparedTargetID = await prepareWindow(around: targetID, keepingPreviewCount: Self.upwardBufferSize) {
-                    initialAnchorID = preparedTargetID
-                    isAtBottom = false
-                }
-            } else if let restoreContext {
-                let targetID: FeedItemID?
-
-                if let found = items.first(where: { $0.matches(restoreContext.position) }) {
-                    targetID = found.id
-                } else {
-                    let savedDate = restoreContext.date
-                    if let nearest = items.min(by: { abs($0.date - savedDate) < abs($1.date - savedDate) }) {
-                        targetID = nearest.id
-                        initialAnchorID = nearest.id
-                    } else {
-                        targetID = nil
-                    }
-                }
-
-                if let targetID,
-                   let preparedTargetID = await prepareWindow(around: targetID, keepingPreviewCount: Self.upwardBufferSize) {
-                    initialAnchorID = preparedTargetID
-                }
-
+            if let targetID = preferredInitialAnchorID(),
+               let preparedTargetID = await prepareWindow(around: targetID, keepingPreviewCount: 10) {
+                initialAnchorID = preparedTargetID
                 isAtBottom = false
             }
         } catch {
@@ -242,7 +216,7 @@ final class FeedViewModel {
 
         let visibleSelectedIDs = selectedIDs.intersection(Set(channels.keys))
         guard !items.isEmpty, visibleSelectedIDs == activeChannelIDs else {
-            await load(selectedIDs: selectedIDs, restoredPosition: currentPosition)
+            await load(selectedIDs: selectedIDs)
             return
         }
 
@@ -252,7 +226,7 @@ final class FeedViewModel {
 
             let refreshedActiveIDs = selectedIDs.intersection(Set(channels.keys))
             guard refreshedActiveIDs == activeChannelIDs else {
-                await load(selectedIDs: selectedIDs, restoredPosition: currentPosition)
+                await load(selectedIDs: selectedIDs)
                 return
             }
 
@@ -683,18 +657,11 @@ final class FeedViewModel {
     }
 
     private func preferredInitialAnchorID() -> FeedItemID? {
-        let startOfToday = Calendar.current.startOfDay(for: Date())
-        let startOfTodayTimestamp = Int(startOfToday.timeIntervalSince1970)
-
-        if let firstUnreadToday = items.first(where: { $0.date >= startOfTodayTimestamp && !isRead($0) }) {
-            return firstUnreadToday.id
+        let sorted = items.sorted()
+        if let firstUnread = sorted.first(where: { !isRead($0) }) {
+            return firstUnread.id
         }
-
-        if let firstToday = items.first(where: { $0.date >= startOfTodayTimestamp }) {
-            return firstToday.id
-        }
-
-        return items.last?.id
+        return sorted.last?.id
     }
 
     private func prepareWindow(

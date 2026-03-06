@@ -67,6 +67,10 @@ struct ChannelSheetView: View {
                 scrollPosition = ScrollPosition(idType: FeedItemID.self)
             }
             isContentReady = true
+            if let target = viewportAnchorID {
+                try? await Task.sleep(for: .milliseconds(50))
+                scrollPosition.scrollTo(id: target, anchor: .center)
+            }
         }
     }
 

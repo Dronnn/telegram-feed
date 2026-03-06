@@ -12,7 +12,7 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 - **Reactions display** — see reaction counts on each post
 - **Read/unread tracking** — messages are marked as read on scroll, synced back to Telegram via `viewMessages` so your channels show as read in the official app too
 - **Unread counter** with scroll-to-bottom action
-- **Scroll position persistence** — resume where you left off, with stable anchoring via the `ScrollPosition` API
+- **Resume at first unread** — each launch scrolls to the first unread message using Telegram's read state as the source of truth, no local position storage
 - **Single channel view** — tap a channel to see only its posts, centered on the exact message you tapped
 - **Liquid Glass design** — built for iOS 26
 

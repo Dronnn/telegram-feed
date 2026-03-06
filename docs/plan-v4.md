@@ -577,3 +577,17 @@ Recommended sequence (each step depends on previous ones):
 | `TFeed/Models/FeedItem.swift` | Message model |
 | `TFeed/Models/FeedItemID.swift` | Message ID (chatId + messageId) |
 | `TFeed/Services/UpdateRouter.swift` | Real-time TDLib updates |
+
+---
+
+## Task: Remove local scroll persistence, use Telegram read state (2026-03-06)
+
+- [x] FeedViewModel: remove `restoredPosition` from `load()`, use `lastReadInboxMessageId` as source of truth
+- [x] FeedViewModel: `preferredInitialAnchorID()` finds first unread across all items (not just today)
+- [x] FeedViewModel: initial `prepareWindow` uses `keepingPreviewCount: 10`
+- [x] FeedView: remove `ScrollViewReader` wrapper (fixes `onScrollTargetVisibilityChange` not firing)
+- [x] FeedView: remove all `ScrollPositionStore` references, `savePosition()`, debug overlay
+- [x] FeedView: remove `onChange(of: scenePhase)` save handler
+- [x] FeedView: simplify `setupScrollPosition()` — only uses VM anchor
+- [x] ChannelSheetView: add backup scroll with 50ms delay after content ready
+- [x] ScrollPositionStore: left as-is for later cleanup

@@ -3,7 +3,6 @@ import SwiftData
 
 struct FeedView: View {
     @Environment(AppState.self) private var appState
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.modelContext) private var modelContext
 
     @State private var viewModel = FeedViewModel()
@@ -52,32 +51,18 @@ struct FeedView: View {
         }
         .task {
             loadSelectedChannelsFromSwiftData()
-            let restoredPosition = ScrollPositionStore.load()
             viewportAnchorID = nil
             readingAnchorID = nil
             lastVisiblePosition = nil
             isContentReady = false
-            await viewModel.load(
-                selectedIDs: appState.selectedChannelIDs,
-                restoredPosition: restoredPosition
-            )
-            setupScrollPosition(restoredPosition: restoredPosition)
+            await viewModel.load(selectedIDs: appState.selectedChannelIDs)
+            setupScrollPosition()
             isContentReady = true
         }
         .onDisappear {
             trimTask?.cancel()
             loadOlderTask?.cancel()
-            if let position = currentReadingTarget() {
-                savePosition(position)
-            }
             viewModel.stopListening()
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            if newPhase != .active {
-                if let position = currentReadingTarget() {
-                    savePosition(position)
-                }
-            }
         }
         .onChange(of: appState.selectedChannelIDs) { _, newIDs in
             channelChangeTask?.cancel()
@@ -126,17 +111,7 @@ struct FeedView: View {
         }
     }
 
-    private func setupScrollPosition(restoredPosition: FeedItemID?) {
-        if let restoredPosition,
-           let resolved = resolvedItemID(for: restoredPosition) {
-            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
-            viewportAnchorID = resolved
-            readingAnchorID = resolved
-            lastVisiblePosition = resolved
-            initialScrollAnchor = .center
-            return
-        }
-
+    private func setupScrollPosition() {
         if let anchorID = viewModel.initialAnchorID,
            let resolved = resolvedItemID(for: anchorID) {
             viewModel.initialAnchorID = nil
@@ -196,11 +171,8 @@ struct FeedView: View {
             Button("Try Again") {
                 Task {
                     isContentReady = false
-                    await viewModel.refresh(
-                        selectedIDs: appState.selectedChannelIDs,
-                        currentPosition: currentAnchorTarget()
-                    )
-                    setupScrollPosition(restoredPosition: nil)
+                    await viewModel.load(selectedIDs: appState.selectedChannelIDs)
+                    setupScrollPosition()
                     isContentReady = true
                 }
             }
@@ -243,11 +215,6 @@ struct FeedView: View {
             if viewModel.isLoadingMore {
                 loadingOverlay
                     .padding(.top, 8)
-            }
-        }
-        .onAppear {
-            if let target = viewportAnchorID {
-                scrollPosition.scrollTo(id: target, anchor: initialScrollAnchor)
             }
         }
         .onScrollPhaseChange { _, newPhase in
@@ -341,7 +308,6 @@ struct FeedView: View {
 
         guard let visibleAnchor = readingAnchor ?? topAnchor else { return }
 
-        savePosition(visibleAnchor)
         viewModel.updateBottomState(isViewportAtBottom, currentPosition: visibleAnchor)
         scheduleTrim(at: topAnchor)
         viewModel.scheduleMarkAsRead(currentPosition: visibleAnchor)
@@ -353,10 +319,6 @@ struct FeedView: View {
     }
 
     private func currentAnchorTarget() -> FeedItemID? {
-        readingAnchorID ?? viewportAnchorID ?? lastVisiblePosition
-    }
-
-    private func currentReadingTarget() -> FeedItemID? {
         readingAnchorID ?? viewportAnchorID ?? lastVisiblePosition
     }
 
@@ -432,11 +394,6 @@ struct FeedView: View {
         }
 
         return newItems.last?.id
-    }
-
-    private func savePosition(_ position: FeedItemID) {
-        let date = viewModel.items.first(where: { $0.matches(position) })?.date ?? 0
-        ScrollPositionStore.save(position, date: date)
     }
 
     private func openChannel(for target: FeedItemID) {
