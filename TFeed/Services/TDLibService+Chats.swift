@@ -1,10 +1,6 @@
 import Foundation
 import TDLibKit
 
-enum TDLibServiceError: Swift.Error {
-    case noClient
-}
-
 extension TDLibService {
     func loadChats(limit: Int = 100) async throws {
         guard let client = getClient() else { return }

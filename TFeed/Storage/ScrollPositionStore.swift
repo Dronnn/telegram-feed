@@ -20,18 +20,9 @@ enum ScrollPositionStore {
         return FeedItemID(chatId: chatId, messageId: messageId)
     }
 
-    static func loadDate() -> Int {
-        UserDefaults.standard.integer(forKey: dateKey)
-    }
-
     static func saveIfNeeded(_ position: FeedItemID?, date: Int = 0) {
         guard let position, load() != position else { return }
         save(position, date: date)
     }
 
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: chatIdKey)
-        UserDefaults.standard.removeObject(forKey: messageIdKey)
-        UserDefaults.standard.removeObject(forKey: dateKey)
-    }
 }

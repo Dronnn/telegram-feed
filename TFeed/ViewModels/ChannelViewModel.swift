@@ -130,6 +130,7 @@ final class ChannelViewModel {
             return
         }
 
+        let rawCount = messages.count
         let existingMessageIDs = representedMessageIDs(in: items)
         let newItems = makeItems(
             from: messages.filter {
@@ -137,10 +138,11 @@ final class ChannelViewModel {
             }
         )
 
-        if newItems.isEmpty {
+        if rawCount < pageSize {
             hasReachedNewest = true
-            return
         }
+
+        guard !newItems.isEmpty else { return }
 
         items = normalizeItems(items + newItems)
     }
@@ -319,7 +321,7 @@ final class ChannelViewModel {
 
         return FeedItem(
             chatId: lhs.chatId,
-            messageId: representedMessageIds.max() ?? lhs.messageId,
+            messageId: lhs.messageId,
             date: max(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,

@@ -49,8 +49,7 @@ final class FeedViewModel {
             channelOldestMessageIDs = [:]
             channelsWithFullHistoryLoaded = []
             let restoreContext = await loadRestoreContext(
-                for: restoredPosition,
-                activeIDs: activeIDs
+                for: restoredPosition
             )
 
             guard !activeIDs.isEmpty else {
@@ -141,9 +140,8 @@ final class FeedViewModel {
                                 .flatMap(\.representedMessageIds)
                                 .min() {
                                 channelOldestMessageIDs[chatId] = minId
-                            } else {
-                                channelOldestMessageIDs.removeValue(forKey: chatId)
                             }
+                            // Keep the last known value when all items for a channel are trimmed
                             channelsWithFullHistoryLoaded.remove(chatId)
                         }
                     }
@@ -351,9 +349,9 @@ final class FeedViewModel {
 
             if let minMessageId {
                 channelOldestMessageIDs[chatId] = minMessageId
-            } else {
-                channelOldestMessageIDs.removeValue(forKey: chatId)
             }
+            // Keep the last known value when all items for a channel are trimmed,
+            // so loadOlder can still use it as an anchor to backfill.
             channelsWithFullHistoryLoaded.remove(chatId)
         }
     }
@@ -479,8 +477,7 @@ final class FeedViewModel {
     }
 
     private func loadRestoreContext(
-        for restoredPosition: FeedItemID?,
-        activeIDs: Set<Int64>
+        for restoredPosition: FeedItemID?
     ) async -> RestoreContext? {
         guard let restoredPosition,
               let message = await fetchExactMessage(
@@ -491,8 +488,7 @@ final class FeedViewModel {
         }
         return RestoreContext(
             position: restoredPosition,
-            date: message.date,
-            channelActive: activeIDs.contains(restoredPosition.chatId)
+            date: message.date
         )
     }
 
@@ -576,7 +572,8 @@ final class FeedViewModel {
            let existingIndex = items.lastIndex(where: { $0.chatId == item.chatId && $0.mediaAlbumId == albumId }) {
             items[existingIndex] = mergeAlbumItems(items[existingIndex], item)
         } else {
-            items.append(item)
+            let insertionIndex = items.firstIndex(where: { $0 > item }) ?? items.endIndex
+            items.insert(item, at: insertionIndex)
         }
 
         let insertedNewCard = existingDisplayTarget == nil
@@ -735,7 +732,6 @@ final class FeedViewModel {
 private struct RestoreContext: Sendable {
     let position: FeedItemID
     let date: Int
-    let channelActive: Bool
 }
 
 private struct ChannelLoadResult: Sendable {
