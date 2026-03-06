@@ -21,6 +21,7 @@ struct FeedView: View {
     @State private var channelChangeTask: Task<Void, Never>?
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
+    @State private var visibleItemIDs: Set<FeedItemID> = []
 
     var body: some View {
         NavigationStack {
@@ -184,92 +185,98 @@ struct FeedView: View {
     }
 
     private var feedContent: some View {
-        List {
-            ForEach(viewModel.items) { item in
-                FeedCardView(
-                    item: item,
-                    isRead: viewModel.isRead(item),
-                    onChannelTap: { openChannel(for: item.id) },
-                    onTelegramLinkTap: { target in openChannel(for: target) },
-                    onPostReferenceTap: { reference in openChannel(for: reference.target) }
-                )
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
-                .listRowInsets(EdgeInsets())
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-                .id(item.id)
-            }
-        }
-        .scrollPosition($scrollPosition)
-        .scrollEdgeEffectStyle(.soft, for: .all)
-        .scrollContentBackground(.hidden)
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 1)
-        .listRowSpacing(0)
-        .transaction { transaction in
-            transaction.scrollPositionUpdatePreservesVelocity = true
-            transaction.scrollContentOffsetAdjustmentBehavior = .automatic
-        }
-        .overlay(alignment: .top) {
-            if viewModel.isLoadingMore {
-                loadingOverlay
-                    .padding(.top, 8)
-            }
-        }
-        .onScrollPhaseChange { _, newPhase in
-            isScrollActive = newPhase.isScrolling
-            if newPhase.isScrolling {
-                loadOlderTask?.cancel()
-            } else {
-                scheduleTrim(at: currentTopAnchorTarget())
-                loadOlderIfNeededAtRest()
-            }
-        }
-        .onScrollGeometryChange(
-            for: Bool.self,
-            of: { geometry in
-                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-                return visibleBottom >= geometry.contentSize.height - 24
-            },
-            action: { _, newValue in
-                isViewportAtBottom = newValue
-                viewModel.updateBottomState(newValue, currentPosition: currentAnchorTarget())
-            }
-        )
-        .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.2) { visibleIDs in
-            handleVisibleTargets(visibleIDs)
-        }
-        .overlay(alignment: .bottomTrailing) {
-            if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
-                scrollToBottomButton
-                    .padding(20)
-            }
-        }
-    }
-
-    private var scrollToBottomButton: some View {
-        Button {
-            guard let last = viewModel.items.last else { return }
-            withAnimation(.easeOut(duration: 0.2)) {
-                scrollPosition.scrollTo(id: last.id, anchor: .bottom)
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.down")
-                    .font(.body.weight(.semibold))
-
-                if viewModel.unreadCount > 0 {
-                    Text("\(viewModel.unreadCount)")
-                        .font(.caption2.weight(.bold))
+        ScrollViewReader { proxy in
+            List {
+                ForEach(viewModel.items) { item in
+                    FeedCardView(
+                        item: item,
+                        isRead: viewModel.isRead(item),
+                        onChannelTap: { openChannel(for: item.id) },
+                        onTelegramLinkTap: { target in openChannel(for: target) },
+                        onPostReferenceTap: { reference in openChannel(for: reference.target) }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .id(item.id)
+                    .onAppear {
+                        visibleItemIDs.insert(item.id)
+                        handleVisibleTargets(Array(visibleItemIDs))
+                    }
+                    .onDisappear {
+                        visibleItemIDs.remove(item.id)
+                    }
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            .scrollPosition($scrollPosition)
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollContentBackground(.hidden)
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, 1)
+            .listRowSpacing(0)
+            .transaction { transaction in
+                transaction.scrollPositionUpdatePreservesVelocity = true
+                transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+            }
+            .overlay(alignment: .top) {
+                if viewModel.isLoadingMore {
+                    loadingOverlay
+                        .padding(.top, 8)
+                }
+            }
+            .onAppear {
+                if let target = viewportAnchorID {
+                    proxy.scrollTo(target, anchor: initialScrollAnchor)
+                }
+            }
+            .onScrollPhaseChange { _, newPhase in
+                isScrollActive = newPhase.isScrolling
+                if newPhase.isScrolling {
+                    loadOlderTask?.cancel()
+                } else {
+                    scheduleTrim(at: currentTopAnchorTarget())
+                    loadOlderIfNeededAtRest()
+                }
+            }
+            .onScrollGeometryChange(
+                for: Bool.self,
+                of: { geometry in
+                    let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                    return visibleBottom >= geometry.contentSize.height - 24
+                },
+                action: { _, newValue in
+                    isViewportAtBottom = newValue
+                    viewModel.updateBottomState(newValue, currentPosition: currentAnchorTarget())
+                }
+            )
+            .overlay(alignment: .bottomTrailing) {
+                if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
+                    Button {
+                        guard let last = viewModel.items.last else { return }
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            proxy.scrollTo(last.id, anchor: .bottom)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "chevron.down")
+                                .font(.body.weight(.semibold))
+                            if viewModel.unreadCount > 0 {
+                                Text("\(viewModel.unreadCount)")
+                                    .font(.caption2.weight(.bold))
+                            }
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .glassEffect(.regular.interactive(), in: .capsule)
+                    }
+                    .buttonStyle(.plain)
+                    .transition(.scale.combined(with: .opacity))
+                    .padding(20)
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .transition(.scale.combined(with: .opacity))
     }
 
     private var loadingOverlay: some View {

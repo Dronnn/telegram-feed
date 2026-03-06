@@ -13,6 +13,7 @@ struct ChannelSheetView: View {
     @State private var isScrollActive = false
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
+    @State private var visibleItemIDs: Set<FeedItemID> = []
 
     init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil, onReadStateChanged: ((Int64, Int64) -> Void)? = nil) {
         self.channelInfo = channelInfo
@@ -67,10 +68,6 @@ struct ChannelSheetView: View {
                 scrollPosition = ScrollPosition(idType: FeedItemID.self)
             }
             isContentReady = true
-            if let target = viewportAnchorID {
-                try? await Task.sleep(for: .milliseconds(50))
-                scrollPosition.scrollTo(id: target, anchor: .center)
-            }
         }
     }
 
@@ -86,68 +83,79 @@ struct ChannelSheetView: View {
     }
 
     private var messageList: some View {
-        List {
-            ForEach(viewModel.items) { item in
-                channelRow(item: item)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 6)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-            }
+        ScrollViewReader { proxy in
+            List {
+                ForEach(viewModel.items) { item in
+                    channelRow(item: item)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .onAppear {
+                            visibleItemIDs.insert(item.id)
+                            handleVisibleTargets(Array(visibleItemIDs))
+                        }
+                        .onDisappear {
+                            visibleItemIDs.remove(item.id)
+                        }
+                }
 
-            if !viewModel.hasReachedNewest {
-                Color.clear
-                    .frame(height: 1)
-                    .listRowInsets(EdgeInsets())
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
+                if !viewModel.hasReachedNewest {
+                    Color.clear
+                        .frame(height: 1)
+                        .listRowInsets(EdgeInsets())
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }
             }
-        }
-        .scrollPosition($scrollPosition)
-        .scrollEdgeEffectStyle(.soft, for: .all)
-        .scrollContentBackground(.hidden)
-        .listStyle(.plain)
-        .environment(\.defaultMinListRowHeight, 1)
-        .listRowSpacing(0)
-        .transaction { transaction in
-            transaction.scrollPositionUpdatePreservesVelocity = true
-            transaction.scrollContentOffsetAdjustmentBehavior = .automatic
-        }
-        .overlay(alignment: .top) {
-            if viewModel.isLoadingOlder {
-                loadingOverlay
-                    .padding(.top, 8)
+            .scrollPosition($scrollPosition)
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .scrollContentBackground(.hidden)
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, 1)
+            .listRowSpacing(0)
+            .transaction { transaction in
+                transaction.scrollPositionUpdatePreservesVelocity = true
+                transaction.scrollContentOffsetAdjustmentBehavior = .automatic
             }
-        }
-        .overlay(alignment: .bottom) {
-            if viewModel.isLoadingNewer {
-                loadingOverlay
-                    .padding(.bottom, 8)
+            .overlay(alignment: .top) {
+                if viewModel.isLoadingOlder {
+                    loadingOverlay
+                        .padding(.top, 8)
+                }
             }
-        }
-        .onScrollPhaseChange { _, newPhase in
-            isScrollActive = newPhase.isScrolling
-            if newPhase.isScrolling {
-                loadOlderTask?.cancel()
-            } else {
-                scheduleTrim(at: viewportAnchorID)
-                loadOlderIfNeededAtRest()
+            .overlay(alignment: .bottom) {
+                if viewModel.isLoadingNewer {
+                    loadingOverlay
+                        .padding(.bottom, 8)
+                }
             }
-        }
-        .onScrollGeometryChange(
-            for: Bool.self,
-            of: { geometry in
-                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-                return visibleBottom >= geometry.contentSize.height - 24
-            },
-            action: { _, isNearBottom in
-                guard isNearBottom, !viewModel.hasReachedNewest else { return }
-                Task { await viewModel.loadNewer() }
+            .onAppear {
+                if let target = viewportAnchorID {
+                    proxy.scrollTo(target, anchor: .center)
+                }
             }
-        )
-        .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.2) { visibleIDs in
-            handleVisibleTargets(visibleIDs)
+            .onScrollPhaseChange { _, newPhase in
+                isScrollActive = newPhase.isScrolling
+                if newPhase.isScrolling {
+                    loadOlderTask?.cancel()
+                } else {
+                    scheduleTrim(at: viewportAnchorID)
+                    loadOlderIfNeededAtRest()
+                }
+            }
+            .onScrollGeometryChange(
+                for: Bool.self,
+                of: { geometry in
+                    let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                    return visibleBottom >= geometry.contentSize.height - 24
+                },
+                action: { _, isNearBottom in
+                    guard isNearBottom, !viewModel.hasReachedNewest else { return }
+                    Task { await viewModel.loadNewer() }
+                }
+            )
         }
     }
 
