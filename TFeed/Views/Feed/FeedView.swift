@@ -200,6 +200,7 @@ struct FeedView: View {
                     .onAppear {
                         visibleItemIDs.insert(item.id)
                         handleVisibleTargets(Array(visibleItemIDs))
+                        triggerLoadOlderIfNeeded()
                     }
                     .onDisappear {
                         visibleItemIDs.remove(item.id)
@@ -334,15 +335,28 @@ struct FeedView: View {
         return visibleIDs.sorted { (indexByID[$0] ?? .max) < (indexByID[$1] ?? .max) }
     }
 
+    private func triggerLoadOlderIfNeeded() {
+        guard !isApplyingChannelChanges,
+              let topAnchor = viewportAnchorID,
+              loadOlderTask == nil else {
+            return
+        }
+
+        loadOlderTask = Task {
+            defer { loadOlderTask = nil }
+            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+        }
+    }
+
     private func loadOlderIfNeededAtRest() {
-        guard !isScrollActive,
-              !isApplyingChannelChanges,
+        guard !isApplyingChannelChanges,
               let topAnchor = viewportAnchorID else {
             return
         }
 
         loadOlderTask?.cancel()
         loadOlderTask = Task {
+            defer { loadOlderTask = nil }
             var anchor = topAnchor
 
             while !Task.isCancelled {
@@ -350,8 +364,7 @@ struct FeedView: View {
                 guard didLoad else { return }
 
                 let shouldContinue = await MainActor.run { () -> Bool in
-                    guard !isScrollActive,
-                          !isApplyingChannelChanges,
+                    guard !isApplyingChannelChanges,
                           let currentAnchor = viewportAnchorID else {
                         return false
                     }

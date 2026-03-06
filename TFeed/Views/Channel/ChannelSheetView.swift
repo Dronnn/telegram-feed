@@ -95,6 +95,7 @@ struct ChannelSheetView: View {
                         .onAppear {
                             visibleItemIDs.insert(item.id)
                             handleVisibleTargets(Array(visibleItemIDs))
+                            triggerLoadOlderIfNeeded()
                         }
                         .onDisappear {
                             visibleItemIDs.remove(item.id)
@@ -242,11 +243,24 @@ struct ChannelSheetView: View {
         viewModel.items.first(where: { $0.matches(target) })?.id
     }
 
+    private func triggerLoadOlderIfNeeded() {
+        guard let topAnchor = viewportAnchorID,
+              loadOlderTask == nil else {
+            return
+        }
+
+        loadOlderTask = Task {
+            defer { loadOlderTask = nil }
+            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+        }
+    }
+
     private func loadOlderIfNeededAtRest() {
-        guard !isScrollActive, let topAnchor = viewportAnchorID else { return }
+        guard let topAnchor = viewportAnchorID else { return }
 
         loadOlderTask?.cancel()
         loadOlderTask = Task {
+            defer { loadOlderTask = nil }
             var anchor = topAnchor
 
             while !Task.isCancelled {
@@ -254,7 +268,7 @@ struct ChannelSheetView: View {
                 guard didLoad else { return }
 
                 let shouldContinue = await MainActor.run { () -> Bool in
-                    guard !isScrollActive, let currentAnchor = viewportAnchorID else {
+                    guard let currentAnchor = viewportAnchorID else {
                         return false
                     }
                     anchor = currentAnchor
