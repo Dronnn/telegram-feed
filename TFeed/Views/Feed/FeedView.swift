@@ -6,9 +6,9 @@ struct FeedView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var viewModel = FeedViewModel()
-    @State private var scrollProxy: ScrollViewProxy?
     @State private var isContentReady = false
     @State private var initialScrollTarget: (id: FeedItemID, anchor: UnitPoint)?
+    @State private var pendingScrollID: FeedItemID?
     @State private var viewportAnchorID: FeedItemID?
     @State private var readingAnchorID: FeedItemID?
     @State private var lastVisiblePosition: FeedItemID?
@@ -90,7 +90,7 @@ struct FeedView: View {
                     previousItems: previousItems,
                     previousTarget: previousTarget
                 ) {
-                    scrollProxy?.scrollTo(replacement, anchor: .center)
+                    pendingScrollID = replacement
                 }
             }
         }
@@ -227,11 +227,15 @@ struct FeedView: View {
                 }
             }
             .onAppear {
-                scrollProxy = proxy
                 if let target = initialScrollTarget {
                     initialScrollTarget = nil
                     proxy.scrollTo(target.id, anchor: target.anchor)
                 }
+            }
+            .onChange(of: pendingScrollID) { _, target in
+                guard let target else { return }
+                pendingScrollID = nil
+                proxy.scrollTo(target, anchor: .center)
             }
             .onScrollPhaseChange { _, newPhase in
                 isScrollActive = newPhase.isScrolling
@@ -268,7 +272,11 @@ struct FeedView: View {
             .overlay(alignment: .bottomTrailing) {
                 if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
                     Button {
-                        scrollToBottom()
+                        if let last = viewModel.items.last {
+                            withAnimation {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
+                        }
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "chevron.down")
@@ -296,11 +304,6 @@ struct FeedView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .background(.ultraThinMaterial, in: Capsule())
-    }
-
-    private func scrollToBottom() {
-        guard let last = viewModel.items.last else { return }
-        scrollProxy?.scrollTo(last.id, anchor: .bottom)
     }
 
     private func scheduleTrim(at position: FeedItemID?) {
@@ -386,10 +389,12 @@ struct FeedView: View {
         refreshTask?.cancel()
         isRefreshing = true
         refreshTask = Task {
-            await viewModel.refresh(
+            async let refreshResult: () = viewModel.refresh(
                 selectedIDs: appState.selectedChannelIDs,
                 currentPosition: currentAnchorTarget()
             )
+            async let minimumDelay: () = Task.sleep(for: .milliseconds(800))
+            _ = await (refreshResult, try? minimumDelay)
             isRefreshing = false
         }
     }

@@ -7,7 +7,6 @@ struct ChannelSheetView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChannelViewModel
-    @State private var scrollProxy: ScrollViewProxy?
     @State private var viewportAnchorID: FeedItemID?
     @State private var isContentReady = false
     @State private var isScrollActive = false
@@ -123,7 +122,6 @@ struct ChannelSheetView: View {
                 }
             }
             .onAppear {
-                scrollProxy = proxy
                 if let target = initialScrollTarget {
                     initialScrollTarget = nil
                     proxy.scrollTo(target.id, anchor: target.anchor)
