@@ -18,6 +18,7 @@ struct FeedView: View {
     @State private var isApplyingChannelChanges = false
     @State private var isPerformingProgrammaticScroll = false
     @State private var saveTask: Task<Void, Never>?
+    @State private var channelChangeTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -75,7 +76,8 @@ struct FeedView: View {
             restoreScrollPositionIfPossible()
         }
         .onChange(of: appState.selectedChannelIDs) { _, newIDs in
-            Task {
+            channelChangeTask?.cancel()
+            channelChangeTask = Task {
                 let previousItems = viewModel.items
                 let previousTarget = currentAnchorTarget()
 

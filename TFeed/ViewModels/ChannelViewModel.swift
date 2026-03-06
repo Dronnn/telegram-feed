@@ -344,7 +344,7 @@ final class ChannelViewModel {
         return FeedItem(
             chatId: lhs.chatId,
             messageId: lhs.messageId,
-            date: max(lhs.date, rhs.date),
+            date: min(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,
             avatarFileId: lhs.avatarFileId,

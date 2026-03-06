@@ -241,6 +241,7 @@ final class FeedViewModel {
                         title: chat.title,
                         avatarFileId: chat.photo?.small.id
                     )
+                    lastReadInboxMessageIDs[chatId] = chat.lastReadInboxMessageId
                 }
             } catch {}
         }
@@ -508,8 +509,12 @@ final class FeedViewModel {
         }
 
         var seenIDs = Set(messages.map(\.id))
+        let maxBackfillIterations = 5
+        var backfillIterations = 0
 
         while !reachedOldest && !messages.contains(where: { $0.id == restoreContext.position.messageId }) {
+            backfillIterations += 1
+            if backfillIterations > maxBackfillIterations { break }
             guard let oldestMessageId = messages.map(\.id).min() else { break }
             let olderBatch = await fetchMessages(
                 chatId: chatId,
@@ -699,7 +704,7 @@ final class FeedViewModel {
         return FeedItem(
             chatId: lhs.chatId,
             messageId: lhs.messageId,
-            date: max(lhs.date, rhs.date),
+            date: min(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,
             avatarFileId: lhs.avatarFileId,
