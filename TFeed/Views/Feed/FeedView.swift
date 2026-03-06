@@ -250,7 +250,7 @@ struct FeedView: View {
             }
         }
         .overlay(alignment: .bottomTrailing) {
-            if !viewModel.isAtBottom {
+            if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
                 scrollToBottomButton
                     .padding(20)
             }

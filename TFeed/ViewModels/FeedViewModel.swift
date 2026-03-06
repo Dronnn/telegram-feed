@@ -317,15 +317,19 @@ final class FeedViewModel {
 
         if let last = items.last, position == last.id {
             isAtBottom = true
-            unreadCount = 0
+            unreadCount = unreadCountBelow(index: items.count - 1)
             return
         }
 
         isAtBottom = false
         if let index = items.firstIndex(where: { $0.id == position }) {
-            let belowCount = items.count - index - 1
-            unreadCount = max(0, belowCount)
+            unreadCount = unreadCountBelow(index: index)
         }
+    }
+
+    private func unreadCountBelow(index: Int) -> Int {
+        guard index < items.count - 1 else { return 0 }
+        return items[(index + 1)...].count { !isRead($0) }
     }
 
     func trimTopIfNeeded(currentPosition: FeedItemID?) {
@@ -568,7 +572,7 @@ final class FeedViewModel {
 
         let insertedNewCard = existingDisplayTarget == nil
 
-        if insertedNewCard {
+        if insertedNewCard && !isRead(item) {
             unreadCount += 1
         }
     }

@@ -429,29 +429,29 @@ ChannelSheet uses the same buffer logic as the main feed:
 
 ### Step 10: Read/Unread Message System with Telegram Sync
 
-- [ ] 10.1: Add `viewMessages` API to TDLibService
+- [x] 10.1: Add `viewMessages` API to TDLibService
 
 Add method `TDLibService.viewMessages(chatId:messageIds:)` to report read messages to Telegram. When a message is marked as read in TFeed, this method is called, and Telegram marks it as read on the server too. This means: the user later opens regular Telegram and sees these channels are already read — no need to scroll through every channel just to mark them as read.
 
-- [ ] 10.2: Implement read state determination via `lastReadInboxMessageId`
+- [x] 10.2: Implement read state determination via `lastReadInboxMessageId`
 
 For each channel, TDLib stores `lastReadInboxMessageId` in the `Chat` object. All messages with `messageId <= lastReadInboxMessageId` are considered read. Use this info to determine the initial read state on loading.
 
-- [ ] 10.3: Implement automatic marking as read on scroll
+- [x] 10.3: Implement automatic marking as read on scroll
 
 When a message is considered read:
 - In the main feed: when the user has scrolled past the message downward (it went above the visible area or was visible long enough).
 - In ChannelSheet: when the user scrolls down through channel messages — they are marked as read.
 - Debounce: mark a message as read when it has been on screen for >= 1 second, or batch-send on scroll position change.
 
-- [ ] 10.4: Add read state visual indicator to each card
+- [x] 10.4: Add read state visual indicator to each card
 
 Each message (FeedCardView and ChannelSheet card) displays a small checkmark or other read indicator:
 - Read: muted appearance or checkmark.
 - Unread: no checkmark or bright indicator.
 - The indicator must update in real-time during scrolling.
 
-- [ ] 10.5: Add `isRead` to the FeedItem model
+- [x] 10.5: Add `isRead` to the FeedItem model
 
 Possibly add a computed or stored `isRead` property to `FeedItem`, based on comparing `messageId` with `lastReadInboxMessageId` for the given `chatId`.
 
@@ -467,7 +467,7 @@ Possibly add a computed or stored `isRead` property to `FeedItem`, based on comp
 
 ### Step 11: Unread Counter on the Down-Arrow Button
 
-- [ ] 11.1: Rework `unreadCount` calculation based on real read state
+- [x] 11.1: Rework `unreadCount` calculation based on real read state
 
 **Current state:** Button with `chevron.down` and a number in the bottom-right corner. Number = count of elements below the current scroll position. Button hides when `isAtBottom == true`.
 
