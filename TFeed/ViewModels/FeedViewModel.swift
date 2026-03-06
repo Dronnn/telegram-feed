@@ -260,6 +260,32 @@ final class FeedViewModel {
         }
     }
 
+    func trimTopIfNeeded(currentPosition: FeedItemID?) {
+        guard let currentPosition,
+              let currentIndex = items.firstIndex(where: { $0.id == currentPosition }) else { return }
+
+        let excess = currentIndex - Self.upwardBufferSize
+        guard excess > 0 else { return }
+
+        let removedItems = Array(items.prefix(excess))
+        items.removeFirst(excess)
+
+        let affectedChatIds = Set(removedItems.map(\.chatId))
+        for chatId in affectedChatIds {
+            let minMessageId = items
+                .filter { $0.chatId == chatId }
+                .flatMap(\.representedMessageIds)
+                .min()
+
+            if let minMessageId {
+                channelOldestMessageIDs[chatId] = minMessageId
+            } else {
+                channelOldestMessageIDs.removeValue(forKey: chatId)
+            }
+            channelsWithFullHistoryLoaded.remove(chatId)
+        }
+    }
+
     func scrolledToBottom() {
         isAtBottom = true
         unreadCount = 0

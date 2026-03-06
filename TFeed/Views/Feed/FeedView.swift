@@ -17,6 +17,7 @@ struct FeedView: View {
     @State private var didScheduleInitialPlacement = false
     @State private var isApplyingChannelChanges = false
     @State private var isPerformingProgrammaticScroll = false
+    @State private var saveTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -56,11 +57,18 @@ struct FeedView: View {
             restoreScrollPositionIfPossible()
         }
         .onDisappear {
+            saveTask?.cancel()
+            if let position = scrollPosition ?? lastVisiblePosition {
+                ScrollPositionStore.saveIfNeeded(position)
+            }
             viewModel.stopListening()
         }
         .onChange(of: scenePhase) { _, newPhase in
-            if newPhase != .active, let position = scrollPosition {
-                ScrollPositionStore.saveIfNeeded(position)
+            if newPhase != .active {
+                saveTask?.cancel()
+                if let position = scrollPosition ?? lastVisiblePosition {
+                    ScrollPositionStore.saveIfNeeded(position)
+                }
             }
         }
         .onChange(of: viewModel.items) { _, _ in
@@ -205,8 +213,9 @@ struct FeedView: View {
                     lastVisiblePosition = newValue
                 }
 
-                ScrollPositionStore.saveIfNeeded(newValue)
+                debounceSavePosition(newValue)
                 viewModel.updateScrollPosition(newValue)
+                viewModel.trimTopIfNeeded(currentPosition: newValue)
 
                 guard let pos = newValue, !isPerformingProgrammaticScroll else { return }
                 Task { await viewModel.loadOlderIfNeeded(currentPosition: pos) }
@@ -346,6 +355,16 @@ struct FeedView: View {
         }
 
         return newItems.last?.id
+    }
+
+    private func debounceSavePosition(_ position: FeedItemID?) {
+        saveTask?.cancel()
+        guard let position else { return }
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            ScrollPositionStore.saveIfNeeded(position)
+        }
     }
 
     private func openChannel(for target: FeedItemID) {

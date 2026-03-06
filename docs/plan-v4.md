@@ -217,7 +217,7 @@ The currently visible message stays in place. New messages are added above, but 
 
 ### Step 3: Trim Messages Above When Scrolling Down
 
-- [ ] 3.1: Implement automatic trimming of top messages
+- [x] 3.1: Implement automatic trimming of top messages
 
 **Current state:** Messages are not removed from the array when scrolling down. The `items` array grows indefinitely.
 
@@ -235,7 +235,7 @@ When the user scrolls down, new messages appear below (either loaded or arriving
 
 5. Thus, the `items` array contains: ~30 messages above current + current + all messages below current (down to the newest).
 
-- [ ] 3.2: Debounced scroll position saving
+- [x] 3.2: Debounced scroll position saving
 
 Always remember which message the user stopped at. This message's ID is written to `ScrollPositionStore` on each scroll position change (debounced, to avoid writing on every pixel).
 
