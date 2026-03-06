@@ -3,15 +3,17 @@ import SwiftUI
 struct ChannelSheetView: View {
     let channelInfo: ChannelInfo
     let initialMessageId: FeedItemID?
+    var onReadStateChanged: ((Int64, Int64) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChannelViewModel
     @State private var scrollPosition: FeedItemID?
     @State private var isContentReady = false
 
-    init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil) {
+    init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil, onReadStateChanged: ((Int64, Int64) -> Void)? = nil) {
         self.channelInfo = channelInfo
         self.initialMessageId = messageId
+        self.onReadStateChanged = onReadStateChanged
         self._viewModel = State(initialValue: ChannelViewModel(channelInfo: channelInfo))
     }
 
@@ -47,6 +49,9 @@ struct ChannelSheetView: View {
         }
         .presentationDetents([.large])
         .presentationDragIndicator(.visible)
+        .onDisappear {
+            onReadStateChanged?(channelInfo.id, viewModel.lastReadInboxMessageId)
+        }
         .task {
             await viewModel.load(aroundMessageId: initialMessageId?.messageId)
             if let target = initialMessageId,

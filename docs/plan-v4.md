@@ -491,7 +491,7 @@ Possibly add a computed or stored `isRead` property to `FeedItem`, based on comp
 
 ### Step 12: Read State Sync Between Main Feed and ChannelSheet
 
-- [ ] 12.1: Implement read state transfer from ChannelSheet to FeedViewModel
+- [x] 12.1: Implement read state transfer from ChannelSheet to FeedViewModel
 
 **Current state:** No sync exists. ChannelSheet is a separate ViewModel that doesn't affect FeedViewModel.
 
@@ -508,7 +508,7 @@ Possibly add a computed or stored `isRead` property to `FeedItem`, based on comp
    - The unread counter on the down-arrow button updates — subtracts messages read in ChannelSheet.
    - If messages from channel X that were read in ChannelSheet are visible in the feed — their visual indicator (checkmark) updates to "read".
 
-- [ ] 12.2: Implement UI update without scroll on return from ChannelSheet
+- [x] 12.2: Implement UI update without scroll on return from ChannelSheet
 
 On ChannelSheet close, call a `FeedViewModel` method that recalculates read state based on updated Telegram data (or pass the list of read messageIds from ChannelViewModel to FeedViewModel). Scroll does NOT change.
 

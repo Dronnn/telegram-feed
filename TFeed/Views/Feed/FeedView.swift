@@ -109,7 +109,13 @@ struct FeedView: View {
             SettingsView(channels: viewModel.channels)
         }
         .sheet(item: $selectedChannel) { channel in
-            ChannelSheetView(channelInfo: channel, scrollTo: selectedMessageId)
+            ChannelSheetView(channelInfo: channel, scrollTo: selectedMessageId) { chatId, lastReadMessageId in
+                viewModel.syncReadState(
+                    chatId: chatId,
+                    lastReadMessageId: lastReadMessageId,
+                    currentPosition: scrollPosition ?? lastVisiblePosition
+                )
+            }
         }
     }
 

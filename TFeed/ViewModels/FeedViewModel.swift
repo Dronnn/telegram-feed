@@ -358,6 +358,15 @@ final class FeedViewModel {
         }
     }
 
+    func syncReadState(chatId: Int64, lastReadMessageId: Int64, currentPosition: FeedItemID?) {
+        let current = lastReadInboxMessageIDs[chatId] ?? 0
+        lastReadInboxMessageIDs[chatId] = max(current, lastReadMessageId)
+
+        if let currentPosition, let index = items.firstIndex(where: { $0.id == currentPosition }) {
+            unreadCount = unreadCountBelow(index: index)
+        }
+    }
+
     func scrolledToBottom() {
         isAtBottom = true
         unreadCount = 0
