@@ -110,12 +110,14 @@ struct ChannelSheetView: View {
                         .listRowBackground(Color.clear)
                 }
             }
+            .scrollPosition($scrollPosition)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .scrollContentBackground(.hidden)
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 1)
             .listRowSpacing(0)
             .transaction { transaction in
+                transaction.scrollPositionUpdatePreservesVelocity = true
                 transaction.scrollContentOffsetAdjustmentBehavior = .automatic
             }
             .overlay(alignment: .top) {

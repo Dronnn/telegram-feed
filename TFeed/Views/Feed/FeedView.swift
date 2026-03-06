@@ -22,6 +22,7 @@ struct FeedView: View {
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
     @State private var visibleItemIDs: Set<FeedItemID> = []
+    @State private var didInitialScroll = false
 
     var body: some View {
         NavigationStack {
@@ -55,6 +56,7 @@ struct FeedView: View {
             viewportAnchorID = nil
             readingAnchorID = nil
             lastVisiblePosition = nil
+            didInitialScroll = false
             isContentReady = false
             await viewModel.load(selectedIDs: appState.selectedChannelIDs)
             setupScrollPosition()
@@ -167,6 +169,7 @@ struct FeedView: View {
 
             Button("Try Again") {
                 Task {
+                    didInitialScroll = false
                     isContentReady = false
                     await viewModel.load(selectedIDs: appState.selectedChannelIDs)
                     setupScrollPosition()
@@ -207,12 +210,14 @@ struct FeedView: View {
                     }
                 }
             }
+            .scrollPosition($scrollPosition)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .scrollContentBackground(.hidden)
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 1)
             .listRowSpacing(0)
             .transaction { transaction in
+                transaction.scrollPositionUpdatePreservesVelocity = true
                 transaction.scrollContentOffsetAdjustmentBehavior = .automatic
             }
             .overlay(alignment: .top) {
@@ -222,7 +227,8 @@ struct FeedView: View {
                 }
             }
             .onAppear {
-                if let target = viewportAnchorID {
+                if !didInitialScroll, let target = viewportAnchorID {
+                    didInitialScroll = true
                     Task { @MainActor in
                         try? await Task.sleep(for: .milliseconds(100))
                         proxy.scrollTo(target, anchor: initialScrollAnchor)
