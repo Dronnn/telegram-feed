@@ -118,11 +118,13 @@ struct FeedView: View {
         if let anchorID = viewModel.initialAnchorID,
            let resolved = resolvedItemID(for: anchorID) {
             viewModel.initialAnchorID = nil
+            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
             viewportAnchorID = resolved
             readingAnchorID = resolved
             lastVisiblePosition = resolved
             initialScrollAnchor = .center
         } else if let newest = viewModel.items.last {
+            scrollPosition = ScrollPosition(id: newest.id, anchor: .bottom)
             viewportAnchorID = newest.id
             readingAnchorID = newest.id
             lastVisiblePosition = newest.id
