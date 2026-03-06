@@ -294,9 +294,14 @@ struct FeedView: View {
             }
         }
 
-        guard !didScheduleInitialPlacement, scrollPosition == nil, let newest = viewModel.items.last else { return }
+        guard !didScheduleInitialPlacement, scrollPosition == nil, !viewModel.items.isEmpty else { return }
         didScheduleInitialPlacement = true
-        requestScroll(to: newest.id, anchor: .bottom)
+        if let anchorID = viewModel.initialAnchorID {
+            viewModel.initialAnchorID = nil
+            requestScroll(to: anchorID, anchor: .center)
+        } else if let newest = viewModel.items.last {
+            requestScroll(to: newest.id, anchor: .bottom)
+        }
     }
 
     private func requestScroll(

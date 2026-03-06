@@ -247,7 +247,7 @@ Always remember which message the user stopped at. This message's ID is written 
 
 ### Step 4: Rework Initial Feed Loading (First Launch)
 
-- [ ] 4.1: Implement "first message of today" logic
+- [x] 4.1: Implement "first message of today" logic
 
 **Current state:** On first launch (no saved `savedMessageId`), the latest 30 messages *per channel* are loaded and displayed chronologically. Scroll position is at the newest message (`.bottom`).
 
@@ -261,17 +261,17 @@ When the user opens the app *for the first time* (no saved message ID in `Scroll
 
 3. The first message of today becomes the **anchor point** — the point the screen scrolls to. It should be visible on screen (in the upper part or center).
 
-- [ ] 4.2: Load buffer of old messages (20-30 from yesterday)
+- [x] 4.2: Load buffer of old messages (20-30 from yesterday)
 
 **Above this message**, load 20–30 messages from *all channels combined* from the previous day (or earlier days if there aren't enough from yesterday). Method: request messages older than the anchor point from all channels, collect into a single array, sort by date, take the last 30.
 
-- [ ] 4.3: Load today's messages below the anchor point
+- [x] 4.3: Load today's messages below the anchor point
 
 **Below the anchor point**, load all messages from today across all channels (there may be few or none at the time of first launch).
 
 Result: the user sees the first message of today, can scroll up to see 20–30 yesterday's messages, can scroll down to see the rest of today's messages.
 
-- [ ] 4.4: Verify placeholder when no channels are selected
+- [x] 4.4: Verify placeholder when no channels are selected
 
 **If no channels are selected** — a placeholder "Select channels to read" is shown (already implemented, needs verification). Test scenarios:
 1. First launch, no channels selected → placeholder.

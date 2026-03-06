@@ -12,6 +12,7 @@ final class FeedViewModel {
     var isAtBottom = true
     var errorMessage: String?
     var pendingScrollToItemID: FeedItemID?
+    var initialAnchorID: FeedItemID?
 
     private var listeningTask: Task<Void, Never>?
     private var activeChannelIDs: Set<Int64> = []
@@ -83,6 +84,29 @@ final class FeedViewModel {
 
             items = normalizeItems(collected)
             applyBufferedIncomingMessages()
+
+            if restoredPosition == nil {
+                let startOfToday = Calendar.current.startOfDay(for: Date())
+                let startOfTodayTimestamp = Int(startOfToday.timeIntervalSince1970)
+
+                if let anchorIndex = items.firstIndex(where: { $0.date >= startOfTodayTimestamp }) {
+                    initialAnchorID = items[anchorIndex].id
+                    if anchorIndex > Self.upwardBufferSize {
+                        items = Array(items[(anchorIndex - Self.upwardBufferSize)...])
+                        let affectedChatIds = Set(items.map(\.chatId))
+                        for chatId in affectedChatIds {
+                            if let minId = items
+                                .filter({ $0.chatId == chatId })
+                                .flatMap(\.representedMessageIds)
+                                .min() {
+                                channelOldestMessageIDs[chatId] = minId
+                            }
+                        }
+                        channelsWithFullHistoryLoaded = []
+                    }
+                    isAtBottom = false
+                }
+            }
         } catch {
             errorMessage = "Unable to load feed. Check your connection."
         }
