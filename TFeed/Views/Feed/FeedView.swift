@@ -116,19 +116,15 @@ struct FeedView: View {
         if let anchorID = viewModel.initialAnchorID,
            let resolved = resolvedItemID(for: anchorID) {
             viewModel.initialAnchorID = nil
-            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
             viewportAnchorID = resolved
             readingAnchorID = resolved
             lastVisiblePosition = resolved
             initialScrollAnchor = .center
         } else if let newest = viewModel.items.last {
-            scrollPosition = ScrollPosition(id: newest.id, anchor: .bottom)
             viewportAnchorID = newest.id
             readingAnchorID = newest.id
             lastVisiblePosition = newest.id
             initialScrollAnchor = .bottom
-        } else {
-            scrollPosition = ScrollPosition(idType: FeedItemID.self)
         }
     }
 
@@ -210,14 +206,12 @@ struct FeedView: View {
                     }
                 }
             }
-            .scrollPosition($scrollPosition)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .scrollContentBackground(.hidden)
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, 1)
             .listRowSpacing(0)
             .transaction { transaction in
-                transaction.scrollPositionUpdatePreservesVelocity = true
                 transaction.scrollContentOffsetAdjustmentBehavior = .automatic
             }
             .overlay(alignment: .top) {
@@ -228,7 +222,10 @@ struct FeedView: View {
             }
             .onAppear {
                 if let target = viewportAnchorID {
-                    proxy.scrollTo(target, anchor: initialScrollAnchor)
+                    Task { @MainActor in
+                        try? await Task.sleep(for: .milliseconds(100))
+                        proxy.scrollTo(target, anchor: initialScrollAnchor)
+                    }
                 }
             }
             .onScrollPhaseChange { _, newPhase in
@@ -254,8 +251,7 @@ struct FeedView: View {
             .overlay(alignment: .bottomTrailing) {
                 if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
                     Button {
-                        guard let last = viewModel.items.last else { return }
-                        withAnimation(.easeOut(duration: 0.2)) {
+                        if let last = viewModel.items.last {
                             proxy.scrollTo(last.id, anchor: .bottom)
                         }
                     } label: {
