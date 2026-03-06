@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import TDLibKit
 
 @MainActor
@@ -11,7 +12,6 @@ final class FeedViewModel {
     var unreadCount = 0
     var isAtBottom = true
     var errorMessage: String?
-    var pendingScrollToItemID: FeedItemID?
     var initialAnchorID: FeedItemID?
     private(set) var lastReadInboxMessageIDs: [Int64: Int64] = [:]
 
@@ -21,10 +21,14 @@ final class FeedViewModel {
     private var channelOldestMessageIDs: [Int64: Int64] = [:]
     private var channelsWithFullHistoryLoaded: Set<Int64> = []
     private var bufferedIncomingMessages: [Message] = []
+    private var deferredOlderItems: [FeedItem] = []
 
     private let initialLoadLimit = 30
     private let restoreBackfillLimit = 100
+    private let refreshPageSize = 50
     static let upwardBufferSize = 30
+    private static let upwardTrimThreshold = upwardBufferSize + 15
+    private static let upwardLoadTriggerThreshold = 5
 
     // MARK: - Public
 
@@ -35,7 +39,6 @@ final class FeedViewModel {
         }
         isLoading = true
         errorMessage = nil
-        pendingScrollToItemID = nil
         isAtBottom = (restoredPosition == nil)
         defer { isLoading = false }
 
@@ -48,15 +51,19 @@ final class FeedViewModel {
             activeChannelIDs = activeIDs
             channelOldestMessageIDs = [:]
             channelsWithFullHistoryLoaded = []
+            deferredOlderItems = []
             let restoreContext = await loadRestoreContext(
                 for: restoredPosition
             )
 
             guard !activeIDs.isEmpty else {
-                items = []
+                performStableMutation {
+                    items = []
+                }
                 unreadCount = 0
                 isAtBottom = true
                 bufferedIncomingMessages.removeAll()
+                deferredOlderItems.removeAll()
                 return
             }
 
@@ -83,28 +90,15 @@ final class FeedViewModel {
                 }
             }
 
-            items = normalizeItems(collected)
+            performStableMutation {
+                items = normalizeItems(collected)
+            }
             applyBufferedIncomingMessages()
 
             if restoredPosition == nil {
-                let startOfToday = Calendar.current.startOfDay(for: Date())
-                let startOfTodayTimestamp = Int(startOfToday.timeIntervalSince1970)
-
-                if let anchorIndex = items.firstIndex(where: { $0.date >= startOfTodayTimestamp }) {
-                    initialAnchorID = items[anchorIndex].id
-                    if anchorIndex > Self.upwardBufferSize {
-                        items = Array(items[(anchorIndex - Self.upwardBufferSize)...])
-                        let affectedChatIds = Set(items.map(\.chatId))
-                        for chatId in affectedChatIds {
-                            if let minId = items
-                                .filter({ $0.chatId == chatId })
-                                .flatMap(\.representedMessageIds)
-                                .min() {
-                                channelOldestMessageIDs[chatId] = minId
-                            }
-                        }
-                        channelsWithFullHistoryLoaded = []
-                    }
+                if let targetID = preferredInitialAnchorID(),
+                   let preparedTargetID = await prepareWindow(around: targetID, keepingPreviewCount: Self.upwardBufferSize) {
+                    initialAnchorID = preparedTargetID
                     isAtBottom = false
                 }
             } else if let restoreContext {
@@ -122,29 +116,9 @@ final class FeedViewModel {
                     }
                 }
 
-                if let targetID, let targetIndex = items.firstIndex(where: { $0.id == targetID }) {
-                    if targetIndex < Self.upwardBufferSize {
-                        let deficit = Self.upwardBufferSize - targetIndex
-                        await loadOlder(deficit: deficit)
-                    }
-
-                    if let newIndex = items.firstIndex(where: { $0.id == targetID }),
-                       newIndex > Self.upwardBufferSize {
-                        let excess = newIndex - Self.upwardBufferSize
-                        let removedItems = Array(items.prefix(excess))
-                        items.removeFirst(excess)
-                        let affectedChatIds = Set(removedItems.map(\.chatId))
-                        for chatId in affectedChatIds {
-                            if let minId = items
-                                .filter({ $0.chatId == chatId })
-                                .flatMap(\.representedMessageIds)
-                                .min() {
-                                channelOldestMessageIDs[chatId] = minId
-                            }
-                            // Keep the last known value when all items for a channel are trimmed
-                            channelsWithFullHistoryLoaded.remove(chatId)
-                        }
-                    }
+                if let targetID,
+                   let preparedTargetID = await prepareWindow(around: targetID, keepingPreviewCount: Self.upwardBufferSize) {
+                    initialAnchorID = preparedTargetID
                 }
 
                 isAtBottom = false
@@ -154,80 +128,140 @@ final class FeedViewModel {
         }
     }
 
-    func loadOlderIfNeeded(currentPosition: FeedItemID?) async {
-        guard let currentPosition else { return }
-        let itemsAbove = items.firstIndex(where: { $0.id == currentPosition }) ?? 0
+    func loadOlderIfNeeded(currentPosition: FeedItemID?) async -> Bool {
+        guard let currentPosition,
+              let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) else {
+            return false
+        }
+
+        let anchorItem = items[itemsAbove]
+        if flushDeferredOlderItems(before: anchorItem) {
+            return true
+        }
+
+        guard itemsAbove <= Self.upwardLoadTriggerThreshold else {
+            return false
+        }
+
         let deficit = Self.upwardBufferSize - itemsAbove
-        guard deficit > 0 else { return }
-        await loadOlder(deficit: deficit)
+        guard deficit > 0 else { return false }
+        return await loadOlder(deficit: deficit, before: anchorItem)
     }
 
-    private func loadOlder(deficit: Int) async {
-        guard !isLoadingMore, !activeChannelIDs.isEmpty else { return }
+    private func loadOlder(deficit: Int, before anchorItem: FeedItem? = nil) async -> Bool {
+        guard !isLoadingMore, !activeChannelIDs.isEmpty else { return false }
         isLoadingMore = true
         defer { isLoadingMore = false }
 
-        let activeIDs = activeChannelIDs.subtracting(channelsWithFullHistoryLoaded)
-        guard !activeIDs.isEmpty else { return }
+        for _ in 0..<6 {
+            let activeIDs = activeChannelIDs.subtracting(channelsWithFullHistoryLoaded)
+            guard !activeIDs.isEmpty else { return false }
 
-        let numChannels = max(activeIDs.count, 1)
-        let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
+            let numChannels = max(activeIDs.count, 1)
+            let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
 
-        var olderMessagesByChannel: [Int64: [Message]] = [:]
+            var olderMessagesByChannel: [Int64: [Message]] = [:]
 
-        await withTaskGroup(of: (Int64, [Message]).self) { group in
-            for chatId in activeIDs {
-                guard let fromMessageId = channelOldestMessageIDs[chatId], fromMessageId != 0 else { continue }
-                group.addTask {
-                    let messages = await self.fetchMessages(
-                        chatId: chatId,
-                        fromMessageId: fromMessageId,
-                        limit: perChannelLimit
-                    )
-                    return (chatId, messages)
-                }
-            }
-
-            for await (chatId, messages) in group {
-                olderMessagesByChannel[chatId] = messages
-            }
-        }
-
-        let existingMessageIDs = representedMessageIDs(in: items, chatId: nil)
-        var additions: [FeedItem] = []
-
-        for (chatId, messages) in olderMessagesByChannel {
-            if messages.isEmpty || messages.count <= 1 {
-                channelsWithFullHistoryLoaded.insert(chatId)
-            }
-
-            let uniqueMessages = messages.filter {
-                !existingMessageIDs.contains(FeedItemID(chatId: chatId, messageId: $0.id))
-            }
-            let unique = makeItems(from: uniqueMessages)
-
-            if unique.isEmpty {
-                channelsWithFullHistoryLoaded.insert(chatId)
-            } else {
-                additions.append(contentsOf: unique)
-                if let oldest = messages.map(\.id).min() {
-                    if let current = channelOldestMessageIDs[chatId] {
-                        channelOldestMessageIDs[chatId] = min(current, oldest)
-                    } else {
-                        channelOldestMessageIDs[chatId] = oldest
+            await withTaskGroup(of: (Int64, [Message]).self) { group in
+                for chatId in activeIDs {
+                    guard let fromMessageId = channelOldestMessageIDs[chatId], fromMessageId != 0 else { continue }
+                    group.addTask {
+                        let messages = await self.fetchMessages(
+                            chatId: chatId,
+                            fromMessageId: fromMessageId,
+                            limit: perChannelLimit
+                        )
+                        return (chatId, messages)
                     }
                 }
+
+                for await (chatId, messages) in group {
+                    olderMessagesByChannel[chatId] = messages
+                }
+            }
+
+            let existingMessageIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
+            var additions: [FeedItem] = []
+            var bufferedDeferredItems = false
+            var advancedAnyCursor = false
+
+            for (chatId, messages) in olderMessagesByChannel {
+                if let oldest = messages.map(\.id).min() {
+                    let previous = channelOldestMessageIDs[chatId] ?? .max
+                    channelOldestMessageIDs[chatId] = min(previous, oldest)
+                    if oldest < previous {
+                        advancedAnyCursor = true
+                    }
+                }
+
+                if messages.isEmpty || messages.count <= 1 {
+                    channelsWithFullHistoryLoaded.insert(chatId)
+                    continue
+                }
+
+                let uniqueMessages = messages.filter {
+                    !existingMessageIDs.contains(FeedItemID(chatId: chatId, messageId: $0.id))
+                }
+                let unique = makeItems(from: uniqueMessages)
+
+                guard !unique.isEmpty else { continue }
+
+                if let anchorItem {
+                    let safeItems = unique.filter { $0 < anchorItem }
+                    let deferredItems = unique.filter { !($0 < anchorItem) }
+                    additions.append(contentsOf: safeItems)
+                    if !deferredItems.isEmpty {
+                        bufferDeferredOlderItems(deferredItems)
+                        bufferedDeferredItems = true
+                    }
+                } else {
+                    additions.append(contentsOf: unique)
+                }
+            }
+
+            if !additions.isEmpty {
+                insertItemsMerged(additions)
+                return true
+            }
+
+            if bufferedDeferredItems {
+                return true
+            }
+
+            if !advancedAnyCursor {
+                return false
             }
         }
 
-        if !additions.isEmpty {
-            insertItemsMerged(additions)
-        }
+        return false
     }
 
-    func refresh(selectedIDs: Set<Int64>, restoredPosition: FeedItemID? = nil) async {
+    func refresh(selectedIDs: Set<Int64>, currentPosition: FeedItemID? = nil) async {
+        guard !isLoading else { return }
         errorMessage = nil
-        await load(selectedIDs: selectedIDs, restoredPosition: restoredPosition)
+
+        let visibleSelectedIDs = selectedIDs.intersection(Set(channels.keys))
+        guard !items.isEmpty, visibleSelectedIDs == activeChannelIDs else {
+            await load(selectedIDs: selectedIDs, restoredPosition: currentPosition)
+            return
+        }
+
+        do {
+            try await TDLibService.shared.loadChats()
+            channels = try await loadChannels()
+
+            let refreshedActiveIDs = selectedIDs.intersection(Set(channels.keys))
+            guard refreshedActiveIDs == activeChannelIDs else {
+                await load(selectedIDs: selectedIDs, restoredPosition: currentPosition)
+                return
+            }
+
+            await refreshNewestMessages()
+            applyBufferedIncomingMessages()
+            updateBottomState(isAtBottom, currentPosition: currentPosition)
+        } catch {
+            errorMessage = "Unable to load feed. Check your connection."
+        }
     }
 
     func applyChannelChanges(newIDs: Set<Int64>) async {
@@ -253,7 +287,10 @@ final class FeedViewModel {
         guard !removedIDs.isEmpty || !addedIDs.isEmpty else { return }
 
         if !removedIDs.isEmpty {
-            items.removeAll { removedIDs.contains($0.chatId) }
+            performStableMutation {
+                items.removeAll { removedIDs.contains($0.chatId) }
+            }
+            deferredOlderItems.removeAll { removedIDs.contains($0.chatId) }
             for chatId in removedIDs {
                 channelOldestMessageIDs.removeValue(forKey: chatId)
                 channelsWithFullHistoryLoaded.remove(chatId)
@@ -309,20 +346,23 @@ final class FeedViewModel {
 
     func updateScrollPosition(_ position: FeedItemID?) {
         guard let position else {
-            isAtBottom = true
-            unreadCount = 0
+            unreadCount = isAtBottom ? 0 : unreadCount
             return
         }
 
-        if let last = items.last, position == last.id {
-            isAtBottom = true
-            unreadCount = unreadCountBelow(index: items.count - 1)
-            return
-        }
-
-        isAtBottom = false
-        if let index = items.firstIndex(where: { $0.id == position }) {
+        if let index = items.firstIndex(where: { $0.matches(position) }) {
             unreadCount = unreadCountBelow(index: index)
+        } else if isAtBottom {
+            unreadCount = 0
+        }
+    }
+
+    func updateBottomState(_ newValue: Bool, currentPosition: FeedItemID?) {
+        isAtBottom = newValue
+        if newValue {
+            unreadCount = 0
+        } else {
+            updateScrollPosition(currentPosition)
         }
     }
 
@@ -333,45 +373,19 @@ final class FeedViewModel {
 
     func trimTopIfNeeded(currentPosition: FeedItemID?) {
         guard let currentPosition,
-              let currentIndex = items.firstIndex(where: { $0.id == currentPosition }) else { return }
+              let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
 
-        let excess = currentIndex - Self.upwardBufferSize
-        guard excess > 0 else { return }
-
-        let removedItems = Array(items.prefix(excess))
-        items.removeFirst(excess)
-
-        let affectedChatIds = Set(removedItems.map(\.chatId))
-        for chatId in affectedChatIds {
-            let minMessageId = items
-                .filter { $0.chatId == chatId }
-                .flatMap(\.representedMessageIds)
-                .min()
-
-            if let minMessageId {
-                channelOldestMessageIDs[chatId] = minMessageId
-            }
-            // Keep the last known value when all items for a channel are trimmed,
-            // so loadOlder can still use it as an anchor to backfill.
-            channelsWithFullHistoryLoaded.remove(chatId)
-        }
+        guard currentIndex > Self.upwardTrimThreshold else { return }
+        trimItemsBeforeIndex(currentIndex, keepingPreviewCount: Self.upwardBufferSize)
     }
 
     func syncReadState(chatId: Int64, lastReadMessageId: Int64, currentPosition: FeedItemID?) {
         let current = lastReadInboxMessageIDs[chatId] ?? 0
         lastReadInboxMessageIDs[chatId] = max(current, lastReadMessageId)
 
-        if let currentPosition, let index = items.firstIndex(where: { $0.id == currentPosition }) {
+        if let currentPosition, let index = items.firstIndex(where: { $0.matches(currentPosition) }) {
             unreadCount = unreadCountBelow(index: index)
         }
-    }
-
-    func scrolledToBottom() {
-        isAtBottom = true
-    }
-
-    func consumePendingScrollRequest() {
-        pendingScrollToItemID = nil
     }
 
     func isRead(_ item: FeedItem) -> Bool {
@@ -393,7 +407,7 @@ final class FeedViewModel {
 
     private func markVisibleAsRead(currentPosition: FeedItemID?) async {
         guard let currentPosition,
-              let currentIndex = items.firstIndex(where: { $0.id == currentPosition }) else { return }
+              let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
 
         var unreadByChat: [Int64: [Int64]] = [:]
 
@@ -479,17 +493,28 @@ final class FeedViewModel {
     private func loadRestoreContext(
         for restoredPosition: FeedItemID?
     ) async -> RestoreContext? {
-        guard let restoredPosition,
-              let message = await fetchExactMessage(
-                chatId: restoredPosition.chatId,
-                messageId: restoredPosition.messageId
-              ) else {
+        guard let restoredPosition else {
             return nil
         }
-        return RestoreContext(
-            position: restoredPosition,
-            date: message.date
-        )
+
+        if let message = await fetchExactMessage(
+            chatId: restoredPosition.chatId,
+            messageId: restoredPosition.messageId
+        ) {
+            return RestoreContext(
+                position: restoredPosition,
+                date: message.date
+            )
+        }
+
+        if let savedDate = ScrollPositionStore.loadDate(), savedDate > 0 {
+            return RestoreContext(
+                position: restoredPosition,
+                date: savedDate
+            )
+        }
+
+        return nil
     }
 
     private func loadInitialMessages(
@@ -570,19 +595,12 @@ final class FeedViewModel {
             return
         }
 
-        let existingDisplayTarget = items.first(where: { $0.matches(item.id) })?.id
-
-        if let albumId = item.mediaAlbumId,
-           let existingIndex = items.lastIndex(where: { $0.chatId == item.chatId && $0.mediaAlbumId == albumId }) {
-            items[existingIndex] = mergeAlbumItems(items[existingIndex], item)
-        } else {
+        performStableMutation {
             let insertionIndex = items.firstIndex(where: { $0 > item }) ?? items.endIndex
             items.insert(item, at: insertionIndex)
         }
 
-        let insertedNewCard = existingDisplayTarget == nil
-
-        if insertedNewCard && !isRead(item) {
+        if !isRead(item) {
             unreadCount += 1
         }
     }
@@ -621,22 +639,106 @@ final class FeedViewModel {
     private func insertItemsMerged(_ newItems: [FeedItem]) {
         guard !newItems.isEmpty else { return }
 
-        let existingIDs = representedMessageIDs(in: items, chatId: nil)
-
-        for newItem in newItems {
+        let existingIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
+        let uniqueNewItems = newItems.filter { newItem in
             let isDuplicate = newItem.representedMessageIds.allSatisfy {
                 existingIDs.contains(FeedItemID(chatId: newItem.chatId, messageId: $0))
             }
-            guard !isDuplicate else { continue }
+            return !isDuplicate
+        }
 
-            if let albumId = newItem.mediaAlbumId,
-               let existingIndex = items.lastIndex(where: { $0.chatId == newItem.chatId && $0.mediaAlbumId == albumId }) {
-                items[existingIndex] = mergeAlbumItems(items[existingIndex], newItem)
-                continue
+        guard !uniqueNewItems.isEmpty else { return }
+
+        performStableMutation {
+            for newItem in uniqueNewItems {
+                let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
+                items.insert(newItem, at: insertionIndex)
+            }
+        }
+    }
+
+    private func bufferDeferredOlderItems(_ newItems: [FeedItem]) {
+        guard !newItems.isEmpty else { return }
+
+        let existingIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
+        let uniqueNewItems = newItems.filter { newItem in
+            let isDuplicate = newItem.representedMessageIds.allSatisfy {
+                existingIDs.contains(FeedItemID(chatId: newItem.chatId, messageId: $0))
+            }
+            return !isDuplicate
+        }
+
+        guard !uniqueNewItems.isEmpty else { return }
+        deferredOlderItems = normalizeItems(deferredOlderItems + uniqueNewItems)
+    }
+
+    private func flushDeferredOlderItems(before anchorItem: FeedItem) -> Bool {
+        let itemsToInsert = deferredOlderItems.filter { $0 < anchorItem }
+        guard !itemsToInsert.isEmpty else { return false }
+
+        let idsToInsert = Set(itemsToInsert.map(\.id))
+        deferredOlderItems.removeAll { idsToInsert.contains($0.id) }
+        insertItemsMerged(itemsToInsert)
+        return true
+    }
+
+    private func preferredInitialAnchorID() -> FeedItemID? {
+        let startOfToday = Calendar.current.startOfDay(for: Date())
+        let startOfTodayTimestamp = Int(startOfToday.timeIntervalSince1970)
+
+        if let firstUnreadToday = items.first(where: { $0.date >= startOfTodayTimestamp && !isRead($0) }) {
+            return firstUnreadToday.id
+        }
+
+        if let firstToday = items.first(where: { $0.date >= startOfTodayTimestamp }) {
+            return firstToday.id
+        }
+
+        return items.last?.id
+    }
+
+    private func prepareWindow(
+        around targetID: FeedItemID,
+        keepingPreviewCount previewCount: Int
+    ) async -> FeedItemID? {
+        guard !items.isEmpty else { return nil }
+
+        if let currentIndex = items.firstIndex(where: { $0.matches(targetID) }),
+           currentIndex < previewCount {
+            let deficit = previewCount - currentIndex
+            _ = await loadOlder(deficit: deficit)
+        }
+
+        guard let resolvedTarget = items.first(where: { $0.matches(targetID) })?.id,
+              let targetIndex = items.firstIndex(where: { $0.id == resolvedTarget }) else {
+            return nil
+        }
+
+        trimItemsBeforeIndex(targetIndex, keepingPreviewCount: previewCount)
+        return items.first(where: { $0.matches(resolvedTarget) })?.id
+    }
+
+    private func trimItemsBeforeIndex(_ currentIndex: Int, keepingPreviewCount previewCount: Int) {
+        guard currentIndex > previewCount else { return }
+
+        let trimCount = currentIndex - previewCount
+        let removedItems = Array(items.prefix(trimCount))
+        performStableMutation {
+            items.removeFirst(trimCount)
+        }
+
+        let affectedChatIds = Set(removedItems.map(\.chatId))
+        for chatId in affectedChatIds {
+            let minMessageId = items
+                .filter { $0.chatId == chatId }
+                .flatMap(\.representedMessageIds)
+                .min()
+
+            if let minMessageId {
+                channelOldestMessageIDs[chatId] = minMessageId
             }
 
-            let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
-            items.insert(newItem, at: insertionIndex)
+            channelsWithFullHistoryLoaded.remove(chatId)
         }
     }
 
@@ -675,6 +777,90 @@ final class FeedViewModel {
         }
 
         return normalized
+    }
+
+    private func refreshNewestMessages() async {
+        var additions: [FeedItem] = []
+        let newestLoadedByChat = Dictionary(
+            uniqueKeysWithValues: activeChannelIDs.compactMap { chatId in
+                newestLoadedMessageID(for: chatId).map { (chatId, $0) }
+            }
+        )
+
+        await withTaskGroup(of: [Message].self) { group in
+            for chatId in activeChannelIDs {
+                group.addTask {
+                    if let newestLoadedMessageID = newestLoadedByChat[chatId] {
+                        return await self.fetchNewerMessages(
+                            chatId: chatId,
+                            after: newestLoadedMessageID
+                        )
+                    }
+
+                    return await self.fetchLatestMessages(
+                        chatId: chatId,
+                        limit: self.initialLoadLimit
+                    )
+                }
+            }
+
+            for await messages in group {
+                additions.append(contentsOf: makeItems(from: messages))
+            }
+        }
+
+        if !additions.isEmpty {
+            insertItemsMerged(additions)
+        }
+    }
+
+    private func newestLoadedMessageID(for chatId: Int64) -> Int64? {
+        items
+            .filter { $0.chatId == chatId }
+            .flatMap(\.representedMessageIds)
+            .max()
+    }
+
+    private func fetchNewerMessages(chatId: Int64, after messageId: Int64) async -> [Message] {
+        var collected: [Message] = []
+        var seen: Set<Int64> = []
+        var cursor = messageId
+
+        while true {
+            let batch = await fetchMessages(
+                chatId: chatId,
+                fromMessageId: cursor,
+                limit: refreshPageSize,
+                offset: -(refreshPageSize - 1)
+            )
+
+            guard !batch.isEmpty else { break }
+
+            let newerMessages = batch
+                .filter { $0.id > messageId }
+                .filter { seen.insert($0.id).inserted }
+
+            guard !newerMessages.isEmpty else { break }
+
+            collected.append(contentsOf: newerMessages)
+
+            guard batch.count >= refreshPageSize,
+                  let nextCursor = newerMessages.map(\.id).max(),
+                  nextCursor > cursor else {
+                break
+            }
+
+            cursor = nextCursor
+        }
+
+        return uniqueMessages(collected)
+    }
+
+    private func performStableMutation(_ updates: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.scrollPositionUpdatePreservesVelocity = true
+        transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+        withTransaction(transaction, updates)
     }
 
     private func uniqueMessages(_ messages: [Message]) -> [Message] {

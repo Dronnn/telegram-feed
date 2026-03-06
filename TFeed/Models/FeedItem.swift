@@ -65,6 +65,7 @@ struct FeedItem: Identifiable, Sendable, Comparable {
 
     static func < (lhs: FeedItem, rhs: FeedItem) -> Bool {
         if lhs.date != rhs.date { return lhs.date < rhs.date }
+        if lhs.chatId != rhs.chatId { return lhs.chatId < rhs.chatId }
         return lhs.messageId < rhs.messageId
     }
 }

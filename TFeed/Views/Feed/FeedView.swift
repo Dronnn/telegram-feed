@@ -7,18 +7,20 @@ struct FeedView: View {
     @Environment(\.modelContext) private var modelContext
 
     @State private var viewModel = FeedViewModel()
-    @State private var scrollPosition: FeedItemID?
+    @State private var scrollPosition = ScrollPosition(idType: FeedItemID.self)
+    @State private var isContentReady = false
+    @State private var viewportAnchorID: FeedItemID?
+    @State private var readingAnchorID: FeedItemID?
     @State private var lastVisiblePosition: FeedItemID?
     @State private var showSettings = false
     @State private var selectedChannel: ChannelInfo?
     @State private var selectedMessageId: FeedItemID?
-    @State private var pendingRestoredPosition: FeedItemID?
-    @State private var pendingScrollRequest: FeedScrollRequest?
-    @State private var didScheduleInitialPlacement = false
     @State private var isApplyingChannelChanges = false
-    @State private var isPerformingProgrammaticScroll = false
-    @State private var saveTask: Task<Void, Never>?
+    @State private var isScrollActive = false
+    @State private var isViewportAtBottom = true
     @State private var channelChangeTask: Task<Void, Never>?
+    @State private var trimTask: Task<Void, Never>?
+    @State private var loadOlderTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,9 @@ struct FeedView: View {
                     errorState(errorMessage)
                 } else if viewModel.items.isEmpty {
                     emptyState
+                } else if !isContentReady {
+                    ProgressView()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     feedContent
                 }
@@ -46,34 +51,32 @@ struct FeedView: View {
         }
         .task {
             loadSelectedChannelsFromSwiftData()
-            pendingRestoredPosition = ScrollPositionStore.load()
-            pendingScrollRequest = nil
-            didScheduleInitialPlacement = false
-            isPerformingProgrammaticScroll = false
-            scrollPosition = nil
+            let restoredPosition = ScrollPositionStore.load()
+            viewportAnchorID = nil
+            readingAnchorID = nil
+            lastVisiblePosition = nil
+            isContentReady = false
             await viewModel.load(
                 selectedIDs: appState.selectedChannelIDs,
-                restoredPosition: pendingRestoredPosition
+                restoredPosition: restoredPosition
             )
-            restoreScrollPositionIfPossible()
+            setupScrollPosition(restoredPosition: restoredPosition)
+            isContentReady = true
         }
         .onDisappear {
-            saveTask?.cancel()
-            if let position = scrollPosition ?? lastVisiblePosition {
+            trimTask?.cancel()
+            loadOlderTask?.cancel()
+            if let position = currentReadingTarget() {
                 savePosition(position)
             }
             viewModel.stopListening()
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase != .active {
-                saveTask?.cancel()
-                if let position = scrollPosition ?? lastVisiblePosition {
+                if let position = currentReadingTarget() {
                     savePosition(position)
                 }
             }
-        }
-        .onChange(of: viewModel.items) { _, _ in
-            restoreScrollPositionIfPossible()
         }
         .onChange(of: appState.selectedChannelIDs) { _, newIDs in
             channelChangeTask?.cancel()
@@ -86,7 +89,8 @@ struct FeedView: View {
                 isApplyingChannelChanges = false
 
                 guard !viewModel.items.isEmpty else {
-                    scrollPosition = nil
+                    viewportAnchorID = nil
+                    readingAnchorID = nil
                     lastVisiblePosition = nil
                     return
                 }
@@ -96,16 +100,9 @@ struct FeedView: View {
                     previousItems: previousItems,
                     previousTarget: previousTarget
                 ) {
-                    requestScroll(to: replacement, anchor: .center)
+                    scrollPosition.scrollTo(id: replacement, anchor: .center)
                 }
             }
-        }
-        .onChange(of: viewModel.pendingScrollToItemID) { _, target in
-            guard let target else { return }
-            if let resolvedTarget = resolvedItemID(for: target) {
-                requestScroll(to: resolvedTarget, anchor: .bottom, animated: true)
-            }
-            viewModel.consumePendingScrollRequest()
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(channels: viewModel.channels)
@@ -115,7 +112,7 @@ struct FeedView: View {
                 viewModel.syncReadState(
                     chatId: chatId,
                     lastReadMessageId: lastReadMessageId,
-                    currentPosition: scrollPosition ?? lastVisiblePosition
+                    currentPosition: currentAnchorTarget()
                 )
             }
         }
@@ -125,6 +122,33 @@ struct FeedView: View {
         let descriptor = FetchDescriptor<SelectedChannel>()
         if let saved = try? modelContext.fetch(descriptor), !saved.isEmpty {
             appState.selectedChannelIDs = Set(saved.map(\.chatId))
+        }
+    }
+
+    private func setupScrollPosition(restoredPosition: FeedItemID?) {
+        if let restoredPosition,
+           let resolved = resolvedItemID(for: restoredPosition) {
+            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
+            viewportAnchorID = resolved
+            readingAnchorID = resolved
+            lastVisiblePosition = resolved
+            return
+        }
+
+        if let anchorID = viewModel.initialAnchorID,
+           let resolved = resolvedItemID(for: anchorID) {
+            viewModel.initialAnchorID = nil
+            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
+            viewportAnchorID = resolved
+            readingAnchorID = resolved
+            lastVisiblePosition = resolved
+        } else if let newest = viewModel.items.last {
+            scrollPosition = ScrollPosition(id: newest.id, anchor: .bottom)
+            viewportAnchorID = newest.id
+            readingAnchorID = newest.id
+            lastVisiblePosition = newest.id
+        } else {
+            scrollPosition = ScrollPosition(idType: FeedItemID.self)
         }
     }
 
@@ -167,10 +191,13 @@ struct FeedView: View {
 
             Button("Try Again") {
                 Task {
+                    isContentReady = false
                     await viewModel.refresh(
                         selectedIDs: appState.selectedChannelIDs,
-                        restoredPosition: currentAnchorTarget()
+                        currentPosition: currentAnchorTarget()
                     )
+                    setupScrollPosition(restoredPosition: nil)
+                    isContentReady = true
                 }
             }
             .buttonStyle(.borderedProminent)
@@ -181,81 +208,62 @@ struct FeedView: View {
     }
 
     private var feedContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView(.vertical) {
-                LazyVStack(spacing: 12) {
-                    if viewModel.isLoadingMore {
-                        ProgressView()
-                            .padding()
-                    }
-
-                    ForEach(viewModel.items) { item in
-                        FeedCardView(
-                            item: item,
-                            isRead: viewModel.isRead(item),
-                            onChannelTap: { openChannel(for: item.id) },
-                            onTelegramLinkTap: { target in openChannel(for: target) },
-                            onPostReferenceTap: { reference in openChannel(for: reference.target) }
-                        )
-                        .padding(.horizontal, 16)
-                        .id(item.id)
-                    }
-                }
-                .padding(.vertical, 12)
-                .scrollTargetLayout()
-            }
-            .scrollPosition(id: $scrollPosition)
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .refreshable {
-                await viewModel.refresh(
-                    selectedIDs: appState.selectedChannelIDs,
-                    restoredPosition: currentAnchorTarget()
+        List {
+            ForEach(viewModel.items) { item in
+                FeedCardView(
+                    item: item,
+                    isRead: viewModel.isRead(item),
+                    onChannelTap: { openChannel(for: item.id) },
+                    onTelegramLinkTap: { target in openChannel(for: target) },
+                    onPostReferenceTap: { reference in openChannel(for: reference.target) }
                 )
+                .padding(.horizontal, 16)
+                .padding(.vertical, 6)
+                .listRowInsets(EdgeInsets())
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .id(item.id)
             }
-            .onChange(of: scrollPosition) { _, newValue in
-                if newValue == nil,
-                   (pendingRestoredPosition != nil || pendingScrollRequest != nil || isApplyingChannelChanges || isPerformingProgrammaticScroll) {
-                    return
-                }
-
-                if let newValue {
-                    lastVisiblePosition = newValue
-                }
-
-                debounceSavePosition(newValue)
-                viewModel.updateScrollPosition(newValue)
-                viewModel.trimTopIfNeeded(currentPosition: newValue)
-                viewModel.scheduleMarkAsRead(currentPosition: newValue)
-
-                guard let pos = newValue, !isPerformingProgrammaticScroll else { return }
-                Task { await viewModel.loadOlderIfNeeded(currentPosition: pos) }
+        }
+        .scrollPosition($scrollPosition)
+        .defaultScrollAnchor(.center)
+        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollContentBackground(.hidden)
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 1)
+        .listRowSpacing(0)
+        .transaction { transaction in
+            transaction.scrollPositionUpdatePreservesVelocity = true
+            transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+        }
+        .overlay(alignment: .top) {
+            if viewModel.isLoadingMore {
+                loadingOverlay
+                    .padding(.top, 8)
             }
-            .onChange(of: pendingScrollRequest) { _, request in
-                guard let request else { return }
-                let anchor: UnitPoint = request.anchor == .bottom ? .bottom : .center
-                Task { @MainActor in
-                    isPerformingProgrammaticScroll = true
-                    await Task.yield()
-                    guard pendingScrollRequest == request else {
-                        isPerformingProgrammaticScroll = false
-                        return
-                    }
-                    if request.animated {
-                        withAnimation(.easeOut(duration: 0.2)) {
-                            proxy.scrollTo(request.target, anchor: anchor)
-                        }
-                    } else {
-                        proxy.scrollTo(request.target, anchor: anchor)
-                    }
-                    if let pendingRestoredPosition,
-                       resolvedItemID(for: pendingRestoredPosition) == request.target {
-                        self.pendingRestoredPosition = nil
-                    }
-                    pendingScrollRequest = nil
-                    await Task.yield()
-                    isPerformingProgrammaticScroll = false
-                }
+        }
+        .onScrollPhaseChange { _, newPhase in
+            isScrollActive = newPhase.isScrolling
+            if newPhase.isScrolling {
+                loadOlderTask?.cancel()
+            } else {
+                scheduleTrim(at: currentTopAnchorTarget())
+                loadOlderIfNeededAtRest()
             }
+        }
+        .onScrollGeometryChange(
+            for: Bool.self,
+            of: { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                return visibleBottom >= geometry.contentSize.height - 24
+            },
+            action: { _, newValue in
+                isViewportAtBottom = newValue
+                viewModel.updateBottomState(newValue, currentPosition: currentAnchorTarget())
+            }
+        )
+        .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.2) { visibleIDs in
+            handleVisibleTargets(visibleIDs)
         }
         .overlay(alignment: .bottomTrailing) {
             if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
@@ -268,7 +276,9 @@ struct FeedView: View {
     private var scrollToBottomButton: some View {
         Button {
             guard let last = viewModel.items.last else { return }
-            requestScroll(to: last.id, anchor: .bottom, animated: true)
+            withAnimation(.easeOut(duration: 0.2)) {
+                scrollPosition.scrollTo(id: last.id, anchor: .bottom)
+            }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.down")
@@ -287,42 +297,46 @@ struct FeedView: View {
         .transition(.scale.combined(with: .opacity))
     }
 
-    private func restoreScrollPositionIfPossible() {
-        guard pendingScrollRequest == nil, !isPerformingProgrammaticScroll else { return }
+    private var loadingOverlay: some View {
+        ProgressView()
+            .controlSize(.small)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(.ultraThinMaterial, in: Capsule())
+    }
 
-        if let pendingRestoredPosition {
-            if let resolvedTarget = resolvedItemID(for: pendingRestoredPosition) {
-                didScheduleInitialPlacement = true
-                requestScroll(to: resolvedTarget, anchor: .center)
-                return
-            }
+    private func scheduleTrim(at position: FeedItemID?) {
+        trimTask?.cancel()
+        guard let position, !isScrollActive else { return }
 
-            if viewModel.isLoading {
-                return
-            }
-
-            self.pendingRestoredPosition = nil
-        }
-
-        guard !didScheduleInitialPlacement, scrollPosition == nil, !viewModel.items.isEmpty else { return }
-        didScheduleInitialPlacement = true
-        if let anchorID = viewModel.initialAnchorID {
-            viewModel.initialAnchorID = nil
-            requestScroll(to: anchorID, anchor: .center)
-        } else if let newest = viewModel.items.last {
-            requestScroll(to: newest.id, anchor: .bottom)
+        trimTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled else { return }
+            viewModel.trimTopIfNeeded(currentPosition: position)
         }
     }
 
-    private func requestScroll(
-        to target: FeedItemID,
-        anchor: FeedScrollRequest.Anchor,
-        animated: Bool = false
-    ) {
-        pendingScrollRequest = FeedScrollRequest(target: target, anchor: anchor, animated: animated)
-        if anchor == .bottom {
-            viewModel.scrolledToBottom()
+    private func handleVisibleTargets(_ visibleIDs: [FeedItemID]) {
+        let orderedVisibleIDs = orderedVisibleTargets(from: visibleIDs)
+        let topAnchor = orderedVisibleIDs.first.flatMap { resolvedItemID(for: $0) }
+        let readingAnchor = orderedVisibleIDs.isEmpty
+            ? nil
+            : resolvedItemID(for: orderedVisibleIDs[orderedVisibleIDs.count / 2])
+
+        if let topAnchor {
+            viewportAnchorID = topAnchor
+            lastVisiblePosition = topAnchor
+            readingAnchorID = readingAnchor ?? topAnchor
+        } else if isApplyingChannelChanges {
+            return
         }
+
+        guard let visibleAnchor = readingAnchor ?? topAnchor else { return }
+
+        savePosition(visibleAnchor)
+        viewModel.updateBottomState(isViewportAtBottom, currentPosition: visibleAnchor)
+        scheduleTrim(at: topAnchor)
+        viewModel.scheduleMarkAsRead(currentPosition: visibleAnchor)
     }
 
     private func resolvedItemID(for target: FeedItemID, in items: [FeedItem]? = nil) -> FeedItemID? {
@@ -331,10 +345,50 @@ struct FeedView: View {
     }
 
     private func currentAnchorTarget() -> FeedItemID? {
-        scrollPosition
-            ?? pendingScrollRequest?.target
-            ?? lastVisiblePosition
-            ?? pendingRestoredPosition
+        readingAnchorID ?? viewportAnchorID ?? lastVisiblePosition
+    }
+
+    private func currentReadingTarget() -> FeedItemID? {
+        readingAnchorID ?? viewportAnchorID ?? lastVisiblePosition
+    }
+
+    private func currentTopAnchorTarget() -> FeedItemID? {
+        viewportAnchorID ?? lastVisiblePosition
+    }
+
+    private func orderedVisibleTargets(from visibleIDs: [FeedItemID]) -> [FeedItemID] {
+        let indexByID = Dictionary(uniqueKeysWithValues: viewModel.items.enumerated().map { ($1.id, $0) })
+        return visibleIDs.sorted { (indexByID[$0] ?? .max) < (indexByID[$1] ?? .max) }
+    }
+
+    private func loadOlderIfNeededAtRest() {
+        guard !isScrollActive,
+              !isApplyingChannelChanges,
+              let topAnchor = viewportAnchorID else {
+            return
+        }
+
+        loadOlderTask?.cancel()
+        loadOlderTask = Task {
+            var anchor = topAnchor
+
+            while !Task.isCancelled {
+                let didLoad = await viewModel.loadOlderIfNeeded(currentPosition: anchor)
+                guard didLoad else { return }
+
+                let shouldContinue = await MainActor.run { () -> Bool in
+                    guard !isScrollActive,
+                          !isApplyingChannelChanges,
+                          let currentAnchor = viewportAnchorID else {
+                        return false
+                    }
+                    anchor = currentAnchor
+                    return true
+                }
+
+                guard shouldContinue else { return }
+            }
+        }
     }
 
     private func replacementScrollTarget(
@@ -373,18 +427,8 @@ struct FeedView: View {
     }
 
     private func savePosition(_ position: FeedItemID) {
-        let date = viewModel.items.first(where: { $0.id == position })?.date ?? 0
-        ScrollPositionStore.saveIfNeeded(position, date: date)
-    }
-
-    private func debounceSavePosition(_ position: FeedItemID?) {
-        saveTask?.cancel()
-        guard let position else { return }
-        saveTask = Task {
-            try? await Task.sleep(for: .milliseconds(500))
-            guard !Task.isCancelled else { return }
-            savePosition(position)
-        }
+        let date = viewModel.items.first(where: { $0.matches(position) })?.date ?? 0
+        ScrollPositionStore.save(position, date: date)
     }
 
     private func openChannel(for target: FeedItemID) {
@@ -392,15 +436,4 @@ struct FeedView: View {
         selectedMessageId = target
         selectedChannel = channel
     }
-}
-
-private struct FeedScrollRequest: Equatable {
-    enum Anchor: Equatable {
-        case center
-        case bottom
-    }
-
-    let target: FeedItemID
-    let anchor: Anchor
-    let animated: Bool
 }

@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import TDLibKit
 
 @MainActor
@@ -14,11 +15,14 @@ final class ChannelViewModel {
 
     let channelInfo: ChannelInfo
 
-    static let upwardBufferSize = 30
+    static let upwardBufferSize = 60
+    private static let upwardTrimThreshold = upwardBufferSize + 30
+    private static let upwardLoadTriggerThreshold = 5
 
     private let initialWindow = 50
     private let pageSize = 30
     private var markAsReadTask: Task<Void, Never>?
+    private var oldestHistoryCursor: Int64?
 
     init(channelInfo: ChannelInfo) {
         self.channelInfo = channelInfo
@@ -61,56 +65,82 @@ final class ChannelViewModel {
             mappedItems = normalizeItems(mappedItems + makeItems(from: [exactMessage]))
         }
 
-        items = normalizeItems(mappedItems)
+        performStableMutation {
+            items = normalizeItems(mappedItems)
+        }
+        oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
     }
 
-    func loadOlderIfNeeded(currentPosition: FeedItemID?) async {
-        guard let currentPosition else { return }
-        let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) ?? 0
+    func loadOlderIfNeeded(currentPosition: FeedItemID?) async -> Bool {
+        guard let currentPosition,
+              let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) else {
+            return false
+        }
+        guard itemsAbove <= Self.upwardLoadTriggerThreshold else { return false }
         let deficit = Self.upwardBufferSize - itemsAbove
-        guard deficit > 0 else { return }
-        await loadOlderByDeficit(deficit)
+        guard deficit > 0 else { return false }
+        return await loadOlderByDeficit(deficit)
     }
 
     func trimTopIfNeeded(currentPosition: FeedItemID?) {
         guard let currentPosition,
               let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
-        let excess = currentIndex - Self.upwardBufferSize
-        guard excess > 0 else { return }
-        items.removeFirst(excess)
+        guard currentIndex > Self.upwardTrimThreshold else { return }
+        let trimCount = currentIndex - Self.upwardBufferSize
+        performStableMutation {
+            items.removeFirst(trimCount)
+        }
+        oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
         hasReachedOldest = false
     }
 
-    private func loadOlderByDeficit(_ deficit: Int) async {
-        guard !isLoadingOlder, !hasReachedOldest, let oldest = items.first else { return }
+    private func loadOlderByDeficit(_ deficit: Int) async -> Bool {
+        guard !isLoadingOlder, !hasReachedOldest,
+              let startingCursor = oldestHistoryCursor ?? items.first?.representedMessageIds.min() ?? items.first?.messageId else {
+            return false
+        }
         isLoadingOlder = true
         defer { isLoadingOlder = false }
 
-        let oldestMessageID = oldest.representedMessageIds.min() ?? oldest.messageId
         let fetchLimit = max(deficit, pageSize)
-        let messages = await fetchHistory(
-            fromMessageId: oldestMessageID,
-            limit: fetchLimit
-        )
+        var cursor = startingCursor
 
-        if messages.isEmpty || messages.count <= 1 {
-            hasReachedOldest = true
-            return
-        }
+        for _ in 0..<6 {
+            let previousCursor = cursor
+            let messages = await fetchHistory(
+                fromMessageId: cursor,
+                limit: fetchLimit
+            )
 
-        let existingMessageIDs = representedMessageIDs(in: items)
-        let newItems = makeItems(
-            from: messages.filter {
-                !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
+            if let fetchedOldest = messages.map(\.id).min() {
+                oldestHistoryCursor = min(oldestHistoryCursor ?? .max, fetchedOldest)
+                if fetchedOldest < cursor {
+                    cursor = fetchedOldest
+                }
             }
-        )
 
-        if newItems.isEmpty {
-            hasReachedOldest = true
-            return
+            if messages.isEmpty || messages.count <= 1 {
+                hasReachedOldest = true
+                return false
+            }
+
+            let existingMessageIDs = representedMessageIDs(in: items)
+            let newItems = makeItems(
+                from: messages.filter {
+                    !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
+                }
+            )
+
+            if !newItems.isEmpty {
+                insertItemsMerged(newItems)
+                oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+                return true
+            }
+
+            guard cursor < previousCursor else { return false }
         }
 
-        insertItemsMerged(newItems)
+        return false
     }
 
     func loadNewer() async {
@@ -262,21 +292,20 @@ final class ChannelViewModel {
         guard !newItems.isEmpty else { return }
 
         let existingIDs = representedMessageIDs(in: items)
-
-        for newItem in newItems {
+        let uniqueNewItems = newItems.filter { newItem in
             let isDuplicate = newItem.representedMessageIds.allSatisfy {
                 existingIDs.contains(FeedItemID(chatId: newItem.chatId, messageId: $0))
             }
-            guard !isDuplicate else { continue }
+            return !isDuplicate
+        }
 
-            if let albumId = newItem.mediaAlbumId,
-               let existingIndex = items.lastIndex(where: { $0.chatId == newItem.chatId && $0.mediaAlbumId == albumId }) {
-                items[existingIndex] = mergeAlbumItems(items[existingIndex], newItem)
-                continue
+        guard !uniqueNewItems.isEmpty else { return }
+
+        performStableMutation {
+            for newItem in uniqueNewItems {
+                let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
+                items.insert(newItem, at: insertionIndex)
             }
-
-            let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
-            items.insert(newItem, at: insertionIndex)
         }
     }
 
@@ -368,6 +397,13 @@ final class ChannelViewModel {
                 }
             }
         )
+    }
+
+    private func performStableMutation(_ updates: () -> Void) {
+        var transaction = Transaction(animation: nil)
+        transaction.scrollPositionUpdatePreservesVelocity = true
+        transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+        withTransaction(transaction, updates)
     }
 
 }

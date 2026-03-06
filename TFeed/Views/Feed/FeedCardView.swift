@@ -34,7 +34,11 @@ struct FeedCardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
-                    if !isRead {
+                    if isRead {
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
                         Circle()
                             .fill(Color.accentColor)
                             .frame(width: 6, height: 6)

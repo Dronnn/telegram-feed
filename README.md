@@ -10,9 +10,10 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 - **Inline media** — photos, videos, GIFs, voice notes rendered directly in the feed
 - **Text formatting** — bold, italic, links, inline code, spoilers
 - **Reactions display** — see reaction counts on each post
+- **Read/unread tracking** — messages are marked as read on scroll, synced back to Telegram via `viewMessages` so your channels show as read in the official app too
 - **Unread counter** with scroll-to-bottom action
-- **Scroll position persistence** — resume where you left off
-- **Single channel view** — tap a channel to see only its posts
+- **Scroll position persistence** — resume where you left off, with stable anchoring via the `ScrollPosition` API
+- **Single channel view** — tap a channel to see only its posts, centered on the exact message you tapped
 - **Liquid Glass design** — built for iOS 26
 
 ## Requirements

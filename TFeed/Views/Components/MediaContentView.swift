@@ -7,6 +7,9 @@ struct MediaContentView: View {
 
     @State private var showFullscreen = false
 
+    private let maxInlineMediaHeight: CGFloat = 320
+    private let minInlineMediaHeight: CGFloat = 180
+
     var body: some View {
         Group {
             switch mediaInfo {
@@ -49,7 +52,10 @@ struct MediaContentView: View {
     @ViewBuilder
     private func photoView(_ info: MediaInfo.PhotoMediaInfo, allowsFullscreenTap: Bool) -> some View {
         TdImageView(fileId: info.fileId, minithumbnail: info.minithumbnail)
-            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fill)
+            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fit)
+            .frame(maxHeight: inlineMediaHeight(width: info.width, height: info.height))
+            .frame(maxWidth: .infinity)
+            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .contentShape(Rectangle())
             .onTapGesture {
@@ -61,7 +67,10 @@ struct MediaContentView: View {
     @ViewBuilder
     private func videoView(_ info: MediaInfo.VideoMediaInfo, allowsFullscreenTap: Bool) -> some View {
         VideoPlayerView(info: info)
-            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fill)
+            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fit)
+            .frame(maxHeight: inlineMediaHeight(width: info.width, height: info.height))
+            .frame(maxWidth: .infinity)
+            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .contentShape(Rectangle())
             .onTapGesture {
@@ -73,7 +82,10 @@ struct MediaContentView: View {
     @ViewBuilder
     private func animationView(_ info: MediaInfo.AnimationMediaInfo, allowsFullscreenTap: Bool) -> some View {
         AnimationInlineView(info: info)
-            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fill)
+            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fit)
+            .frame(maxHeight: inlineMediaHeight(width: info.width, height: info.height))
+            .frame(maxWidth: .infinity)
+            .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .contentShape(Rectangle())
             .onTapGesture {
@@ -142,6 +154,18 @@ struct MediaContentView: View {
         let ratio = CGFloat(width) / CGFloat(height)
         // Clamp to reasonable range
         return max(0.4, min(3.0, ratio))
+    }
+
+    private func inlineMediaHeight(width: Int, height: Int) -> CGFloat {
+        guard width > 0, height > 0 else { return 240 }
+        let ratio = CGFloat(width) / CGFloat(height)
+        if ratio < 0.7 {
+            return maxInlineMediaHeight
+        }
+        if ratio > 1.8 {
+            return minInlineMediaHeight
+        }
+        return 260
     }
 }
 
