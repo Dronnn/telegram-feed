@@ -272,7 +272,7 @@ final class ChannelViewModel {
                 ? item
                 : FeedItem(
                     chatId: item.chatId,
-                    messageId: unseenRepresentedIDs.max() ?? item.messageId,
+                    messageId: item.messageId,
                     date: item.date,
                     formattedText: item.formattedText,
                     channelTitle: item.channelTitle,

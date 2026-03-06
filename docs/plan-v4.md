@@ -521,7 +521,7 @@ On ChannelSheet close, call a `FeedViewModel` method that recalculates read stat
 
 ### Step 13: Feed Is Always Chronological, Nothing Disappears
 
-- [ ] 13.1: Verify and guarantee chronological order
+- [x] 13.1: Verify and guarantee chronological order
 
 **Required behavior:**
 
