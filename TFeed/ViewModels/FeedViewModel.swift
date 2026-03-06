@@ -525,15 +525,9 @@ final class FeedViewModel {
             items.append(item)
         }
 
-        let displayTarget = items.first(where: { $0.matches(item.id) })?.id ?? item.id
         let insertedNewCard = existingDisplayTarget == nil
 
-        if isAtBottom {
-            unreadCount = 0
-            if insertedNewCard {
-                pendingScrollToItemID = displayTarget
-            }
-        } else if insertedNewCard {
+        if insertedNewCard {
             unreadCount += 1
         }
     }
