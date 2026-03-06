@@ -320,7 +320,7 @@ Scroll positions on the saved message (center of screen or upper part). No jumps
 
 ### Step 6: Real-Time New Message Monitoring
 
-- [ ] 6.1: Adapt `applyIncomingMessage()` to the new buffer model
+- [x] 6.1: Adapt `applyIncomingMessage()` to the new buffer model
 
 **Current state:** `FeedViewModel.startListening()` listens to `updateNewMessage` via `UpdateRouter` and adds new messages to the `items` array. If the user is at the bottom (`isAtBottom`) — scrolls to the new message. Otherwise — increments `unreadCount`.
 
@@ -345,7 +345,7 @@ The basic logic already works, but needs adaptation to the new model:
 
 ### Step 7: Button/Link on Each Message to Open ChannelSheet
 
-- [ ] 7.1: Verify and fix the button on each card
+- [x] 7.1: Verify and fix the button on each card
 
 **Current state:** `FeedCardView` has a link (text button) with the channel name that opens `ChannelSheetView` when tapped.
 
