@@ -59,7 +59,7 @@ struct FeedView: View {
         .onDisappear {
             saveTask?.cancel()
             if let position = scrollPosition ?? lastVisiblePosition {
-                ScrollPositionStore.saveIfNeeded(position)
+                savePosition(position)
             }
             viewModel.stopListening()
         }
@@ -67,7 +67,7 @@ struct FeedView: View {
             if newPhase != .active {
                 saveTask?.cancel()
                 if let position = scrollPosition ?? lastVisiblePosition {
-                    ScrollPositionStore.saveIfNeeded(position)
+                    savePosition(position)
                 }
             }
         }
@@ -287,11 +287,11 @@ struct FeedView: View {
                 return
             }
 
-            if !appState.selectedChannelIDs.contains(pendingRestoredPosition.chatId) {
-                self.pendingRestoredPosition = nil
-            } else {
+            if viewModel.isLoading {
                 return
             }
+
+            self.pendingRestoredPosition = nil
         }
 
         guard !didScheduleInitialPlacement, scrollPosition == nil, !viewModel.items.isEmpty else { return }
@@ -362,13 +362,18 @@ struct FeedView: View {
         return newItems.last?.id
     }
 
+    private func savePosition(_ position: FeedItemID) {
+        let date = viewModel.items.first(where: { $0.id == position })?.date ?? 0
+        ScrollPositionStore.saveIfNeeded(position, date: date)
+    }
+
     private func debounceSavePosition(_ position: FeedItemID?) {
         saveTask?.cancel()
         guard let position else { return }
         saveTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            ScrollPositionStore.saveIfNeeded(position)
+            savePosition(position)
         }
     }
 

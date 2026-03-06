@@ -106,6 +106,48 @@ final class FeedViewModel {
                     }
                     isAtBottom = false
                 }
+            } else if let restoreContext {
+                let targetID: FeedItemID?
+
+                if let found = items.first(where: { $0.matches(restoreContext.position) }) {
+                    targetID = found.id
+                } else {
+                    let savedDate = restoreContext.date
+                    if let nearest = items.min(by: { abs($0.date - savedDate) < abs($1.date - savedDate) }) {
+                        targetID = nearest.id
+                        initialAnchorID = nearest.id
+                    } else {
+                        targetID = nil
+                    }
+                }
+
+                if let targetID, let targetIndex = items.firstIndex(where: { $0.id == targetID }) {
+                    if targetIndex < Self.upwardBufferSize {
+                        let deficit = Self.upwardBufferSize - targetIndex
+                        await loadOlder(deficit: deficit)
+                    }
+
+                    if let newIndex = items.firstIndex(where: { $0.id == targetID }),
+                       newIndex > Self.upwardBufferSize {
+                        let excess = newIndex - Self.upwardBufferSize
+                        let removedItems = Array(items.prefix(excess))
+                        items.removeFirst(excess)
+                        let affectedChatIds = Set(removedItems.map(\.chatId))
+                        for chatId in affectedChatIds {
+                            if let minId = items
+                                .filter({ $0.chatId == chatId })
+                                .flatMap(\.representedMessageIds)
+                                .min() {
+                                channelOldestMessageIDs[chatId] = minId
+                            } else {
+                                channelOldestMessageIDs.removeValue(forKey: chatId)
+                            }
+                            channelsWithFullHistoryLoaded.remove(chatId)
+                        }
+                    }
+                }
+
+                isAtBottom = false
             }
         } catch {
             errorMessage = "Unable to load feed. Check your connection."
@@ -387,42 +429,38 @@ final class FeedViewModel {
         activeIDs: Set<Int64>
     ) async -> RestoreContext? {
         guard let restoredPosition,
-              activeIDs.contains(restoredPosition.chatId),
               let message = await fetchExactMessage(
                 chatId: restoredPosition.chatId,
                 messageId: restoredPosition.messageId
               ) else {
             return nil
         }
-
-        return RestoreContext(position: restoredPosition, date: message.date)
+        return RestoreContext(
+            position: restoredPosition,
+            date: message.date,
+            channelActive: activeIDs.contains(restoredPosition.chatId)
+        )
     }
 
     private func loadInitialMessages(
         chatId: Int64,
         restoreContext: RestoreContext?
     ) async -> ChannelLoadResult {
-        guard let restoreContext else {
-            let latest = await fetchLatestMessages(chatId: chatId, limit: initialLoadLimit)
+        let latest = await fetchLatestMessages(chatId: chatId, limit: initialLoadLimit)
+        var messages = uniqueMessages(latest)
+        var reachedOldest = latest.count < initialLoadLimit
+
+        guard let restoreContext, chatId == restoreContext.position.chatId else {
             return ChannelLoadResult(
                 chatId: chatId,
-                messages: uniqueMessages(latest),
-                reachedOldest: latest.count < initialLoadLimit
+                messages: messages,
+                reachedOldest: reachedOldest
             )
         }
 
-        var messages = uniqueMessages(
-            await fetchLatestMessages(chatId: chatId, limit: initialLoadLimit)
-        )
-        var reachedOldest = messages.isEmpty
         var seenIDs = Set(messages.map(\.id))
 
-        while shouldContinueRestoreBackfill(
-            chatId: chatId,
-            messages: messages,
-            restoreContext: restoreContext,
-            reachedOldest: reachedOldest
-        ) {
+        while !reachedOldest && !messages.contains(where: { $0.id == restoreContext.position.messageId }) {
             guard let oldestMessageId = messages.map(\.id).min() else { break }
             let olderBatch = await fetchMessages(
                 chatId: chatId,
@@ -442,35 +480,17 @@ final class FeedViewModel {
             }
         }
 
-        if chatId == restoreContext.position.chatId {
-            let restoredBatch = await ensureRestoredMessage(
-                restoreContext.position,
-                in: messages
-            )
-            messages = uniqueMessages(restoredBatch)
-        }
+        let restoredBatch = await ensureRestoredMessage(
+            restoreContext.position,
+            in: messages
+        )
+        messages = uniqueMessages(restoredBatch)
 
         return ChannelLoadResult(
             chatId: chatId,
             messages: messages,
             reachedOldest: reachedOldest
         )
-    }
-
-    private func shouldContinueRestoreBackfill(
-        chatId: Int64,
-        messages: [Message],
-        restoreContext: RestoreContext,
-        reachedOldest: Bool
-    ) -> Bool {
-        guard !reachedOldest else { return false }
-
-        if chatId == restoreContext.position.chatId {
-            return !messages.contains(where: { $0.id == restoreContext.position.messageId })
-        }
-
-        guard let oldestDate = messages.map(\.date).min() else { return false }
-        return oldestDate >= restoreContext.date
     }
 
     private func fetchExactMessage(chatId: Int64, messageId: Int64) async -> Message? {
@@ -667,6 +687,7 @@ final class FeedViewModel {
 private struct RestoreContext: Sendable {
     let position: FeedItemID
     let date: Int
+    let channelActive: Bool
 }
 
 private struct ChannelLoadResult: Sendable {

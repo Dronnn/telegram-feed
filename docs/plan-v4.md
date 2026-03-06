@@ -286,7 +286,7 @@ Result: the user sees the first message of today, can scroll up to see 20–30 y
 
 ### Step 5: Rework Initial Feed Loading (Subsequent Launch)
 
-- [ ] 5.1: Implement loading a window around the saved message
+- [x] 5.1: Implement loading a window around the saved message
 
 **Current state:** On subsequent launch, `ScrollPositionStore.load()` returns a saved `FeedItemID` (chatId + messageId). The app tries to load the latest 30 messages per channel and scroll to the saved message.
 
@@ -300,15 +300,15 @@ When the user opens the app again (saved `savedMessageId` exists):
 
 3. Find the saved message in this array (by `chatId` + `messageId`). If found — scroll to it. If not (channel was deselected, or message was deleted) — scroll to the nearest one by time.
 
-- [ ] 5.2: Ensure 30-message buffer above the saved position
+- [x] 5.2: Ensure 30-message buffer above the saved position
 
 **Above the saved message** there must be 30 messages from all channels combined. If after initial loading there are fewer than 30 — load more.
 
-- [ ] 5.3: Load all new messages below the saved position
+- [x] 5.3: Load all new messages below the saved position
 
 **Below the saved message** — all messages that appeared after it (up to now). These are new, unread messages.
 
-- [ ] 5.4: Scroll to the saved message without jerks
+- [x] 5.4: Scroll to the saved message without jerks
 
 Scroll positions on the saved message (center of screen or upper part). No jumps, no flickering, no show-top-first-then-scroll behavior.
 
