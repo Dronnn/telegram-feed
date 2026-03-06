@@ -54,6 +54,14 @@ struct FullscreenMediaView: View {
         case .animation(let info):
             FullscreenAnimationPlayer(info: info)
 
+        case .album(let items):
+            TabView {
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                    AlbumPageView(mediaInfo: item)
+                }
+            }
+            .tabViewStyle(.page(indexDisplayMode: .automatic))
+
         default:
             EmptyView()
         }
@@ -87,6 +95,30 @@ struct FullscreenMediaView: View {
                     scale = max(1, scale)
                 }
             }
+    }
+}
+
+private struct AlbumPageView: View {
+    let mediaInfo: MediaInfo
+
+    var body: some View {
+        switch mediaInfo {
+        case .photo(let info):
+            TdImageView(fileId: info.fileId, minithumbnail: info.minithumbnail)
+                .aspectRatio(
+                    info.width > 0 && info.height > 0 ? CGFloat(info.width) / CGFloat(info.height) : 1,
+                    contentMode: .fit
+                )
+
+        case .video(let info):
+            FullscreenVideoPlayer(info: info)
+
+        case .animation(let info):
+            FullscreenAnimationPlayer(info: info)
+
+        default:
+            EmptyView()
+        }
     }
 }
 

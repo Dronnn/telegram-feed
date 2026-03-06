@@ -2,6 +2,12 @@ import Foundation
 import TDLibKit
 import UIKit
 
+#if DEBUG
+private func debugLog(_ message: @autoclosure () -> String) { print(message()) }
+#else
+@inline(__always) private func debugLog(_ message: @autoclosure () -> String) {}
+#endif
+
 extension TDLibClient: @retroactive @unchecked Sendable {}
 extension TDLibClientManager: @retroactive @unchecked Sendable {}
 extension Chat: @retroactive @unchecked Sendable {}
@@ -10,8 +16,15 @@ extension File: @retroactive @unchecked Sendable {}
 extension FormattedText: @retroactive @unchecked Sendable {}
 extension TextEntity: @retroactive @unchecked Sendable {}
 extension TextEntityType: @retroactive @unchecked Sendable {}
+extension ResendCodeReason: @retroactive @unchecked Sendable {}
+extension ResendCodeReasonVerificationFailed: @retroactive @unchecked Sendable {}
 
 actor TDLibService {
+    enum TDLibServiceError: Swift.Error {
+        case clientNotInitialized
+        case documentDirectoryUnavailable
+    }
+
     static let shared = TDLibService()
 
     private var manager: TDLibClientManager?
@@ -43,12 +56,12 @@ actor TDLibService {
     // MARK: - TDLib Parameters
 
     func setParameters() async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
 
-        let documentsURL = FileManager.default.urls(
+        guard let documentsURL = FileManager.default.urls(
             for: .documentDirectory,
             in: .userDomainMask
-        ).first!
+        ).first else { throw TDLibServiceError.documentDirectoryUnavailable }
 
         let databasePath = documentsURL
             .appendingPathComponent("tdlib", isDirectory: true)
@@ -83,38 +96,36 @@ actor TDLibService {
     // MARK: - Authorization
 
     func sendPhoneNumber(_ phoneNumber: String) async throws {
-        guard let client else { return }
-        let settings = PhoneNumberAuthenticationSettings(
-            allowFlashCall: false,
-            allowMissedCall: false,
-            allowSmsRetrieverApi: false,
-            authenticationTokens: [],
-            firebaseAuthenticationSettings: nil,
-            hasUnknownPhoneNumber: false,
-            isCurrentPhoneNumber: false
-        )
-        print("[TDLib Auth] Sending phone number: \(phoneNumber.prefix(4))***")
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
+        debugLog("[TDLib Auth] Sending phone number")
         try await client.setAuthenticationPhoneNumber(
             phoneNumber: phoneNumber,
-            settings: settings
+            settings: nil
         )
-        print("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
+        debugLog("[TDLib Auth] setAuthenticationPhoneNumber succeeded")
     }
 
-    func resendAuthenticationCode() async throws {
-        guard let client else { return }
-        print("[TDLib Auth] Resending authentication code")
-        _ = try await client.resendAuthenticationCode(reason: .resendCodeReasonUserRequest)
-        print("[TDLib Auth] resendAuthenticationCode succeeded")
+    func resendAuthenticationCode(reason: ResendCodeReason = .resendCodeReasonUserRequest) async throws {
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
+        debugLog("[TDLib Auth] Resending authentication code, reason: \(reason)")
+        _ = try await client.resendAuthenticationCode(reason: reason)
+        debugLog("[TDLib Auth] resendAuthenticationCode succeeded")
+    }
+
+    func reportAuthenticationCodeMissing() async throws {
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
+        debugLog("[TDLib Auth] Reporting authentication code missing")
+        try await client.reportAuthenticationCodeMissing(mobileNetworkCode: nil)
+        debugLog("[TDLib Auth] reportAuthenticationCodeMissing succeeded")
     }
 
     func sendCode(_ code: String) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         try await client.checkAuthenticationCode(code: code)
     }
 
     func sendPassword(_ password: String) async throws {
-        guard let client else { return }
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
         try await client.checkAuthenticationPassword(password: password)
     }
 

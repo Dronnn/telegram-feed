@@ -3,10 +3,14 @@ import Foundation
 enum ScrollPositionStore {
     private static let chatIdKey = "lastRead.chatId"
     private static let messageIdKey = "lastRead.messageId"
+    private static let dateKey = "lastRead.date"
 
-    static func save(_ position: FeedItemID) {
+    static func save(_ position: FeedItemID, date: Int = 0) {
         UserDefaults.standard.set(position.chatId, forKey: chatIdKey)
         UserDefaults.standard.set(position.messageId, forKey: messageIdKey)
+        if date > 0 {
+            UserDefaults.standard.set(date, forKey: dateKey)
+        }
     }
 
     static func load() -> FeedItemID? {
@@ -16,8 +20,13 @@ enum ScrollPositionStore {
         return FeedItemID(chatId: chatId, messageId: messageId)
     }
 
-    static func clear() {
-        UserDefaults.standard.removeObject(forKey: chatIdKey)
-        UserDefaults.standard.removeObject(forKey: messageIdKey)
+    static func loadDate() -> Int? {
+        UserDefaults.standard.object(forKey: dateKey) as? Int
     }
+
+    static func saveIfNeeded(_ position: FeedItemID?, date: Int = 0) {
+        guard let position, load() != position else { return }
+        save(position, date: date)
+    }
+
 }

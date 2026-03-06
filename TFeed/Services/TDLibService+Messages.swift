@@ -18,4 +18,14 @@ extension TDLibService {
         )
         return result.messages ?? []
     }
+
+    func viewMessages(chatId: Int64, messageIds: [Int64]) async throws {
+        guard let client = getClient() else { return }
+        _ = try await client.viewMessages(
+            chatId: chatId,
+            forceRead: true,
+            messageIds: messageIds,
+            source: .messageSourceChatHistory
+        )
+    }
 }

@@ -1,9 +1,11 @@
 import SwiftUI
-import TDLibKit
 
 struct FeedCardView: View {
     let item: FeedItem
+    var isRead: Bool = true
     var onChannelTap: (() -> Void)? = nil
+    var onTelegramLinkTap: ((FeedItemID) -> Void)? = nil
+    var onPostReferenceTap: ((FeedItem.PostReference) -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -32,6 +34,16 @@ struct FeedCardView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
 
+                    if isRead {
+                        Image(systemName: "checkmark")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 6, height: 6)
+                    }
+
                     Spacer()
                 }
             }
@@ -39,7 +51,11 @@ struct FeedCardView: View {
 
             // Text content
             if let formattedText = item.formattedText, !formattedText.text.isEmpty {
-                FormattedTextView(formattedText: formattedText)
+                FormattedTextView(formattedText: formattedText, onTelegramLinkTap: { url in
+                    guard let target = telegramTarget(from: url) else { return false }
+                    onTelegramLinkTap?(target)
+                    return true
+                })
             }
 
             // Media
@@ -49,8 +65,24 @@ struct FeedCardView: View {
 
             // Reactions
             ReactionsBarView(reactions: item.reactions)
+
+            Button {
+                onPostReferenceTap?(item.postReference)
+            } label: {
+                Text(item.postReference.label)
+                    .font(.caption)
+                    .foregroundStyle(Color.accentColor)
+                    .underline()
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .buttonStyle(.plain)
         }
         .padding(14)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
+    }
+
+    private func telegramTarget(from url: URL) -> FeedItemID? {
+        nil
     }
 }

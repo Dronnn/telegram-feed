@@ -20,6 +20,9 @@ struct SettingsView: View {
                 securitySection
                 accountSection
             }
+            .refreshable {
+                await viewModel.refreshChannels()
+            }
             .listStyle(.insetGrouped)
             .searchable(text: $viewModel.searchText, prompt: "Search channels...")
             .navigationTitle("Settings")
@@ -66,8 +69,17 @@ struct SettingsView: View {
 
     private var channelsSection: some View {
         Section("Channels") {
-            ForEach(viewModel.filteredChannels) { channel in
-                channelRow(channel)
+            if viewModel.filteredChannels.isEmpty {
+                Text(viewModel.searchText.isEmpty
+                     ? "You have no channel subscriptions yet"
+                     : "No channels matching your search")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .listRowBackground(Color.clear)
+            } else {
+                ForEach(viewModel.filteredChannels) { channel in
+                    channelRow(channel)
+                }
             }
         }
     }
