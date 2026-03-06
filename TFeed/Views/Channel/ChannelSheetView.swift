@@ -7,13 +7,14 @@ struct ChannelSheetView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var viewModel: ChannelViewModel
-    @State private var scrollPosition = ScrollPosition(idType: FeedItemID.self)
+    @State private var scrollProxy: ScrollViewProxy?
     @State private var viewportAnchorID: FeedItemID?
     @State private var isContentReady = false
     @State private var isScrollActive = false
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
     @State private var visibleItemIDs: Set<FeedItemID> = []
+    @State private var initialScrollTarget: (id: FeedItemID, anchor: UnitPoint)?
 
     init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil, onReadStateChanged: ((Int64, Int64) -> Void)? = nil) {
         self.channelInfo = channelInfo
@@ -63,9 +64,7 @@ struct ChannelSheetView: View {
             await viewModel.load(aroundMessageId: initialMessageId?.messageId)
             if let target = resolvedInitialScrollTarget() {
                 viewportAnchorID = target
-                scrollPosition = ScrollPosition(id: target, anchor: .center)
-            } else {
-                scrollPosition = ScrollPosition(idType: FeedItemID.self)
+                initialScrollTarget = (id: target, anchor: .center)
             }
             isContentReady = true
         }
@@ -84,40 +83,31 @@ struct ChannelSheetView: View {
 
     private var messageList: some View {
         ScrollViewReader { proxy in
-            List {
-                ForEach(viewModel.items) { item in
-                    channelRow(item: item)
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .onAppear {
-                            visibleItemIDs.insert(item.id)
-                            handleVisibleTargets(Array(visibleItemIDs))
-                            triggerLoadOlderIfNeeded()
-                        }
-                        .onDisappear {
-                            visibleItemIDs.remove(item.id)
-                        }
-                }
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(viewModel.items) { item in
+                        channelRow(item: item)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 6)
+                            .onAppear {
+                                visibleItemIDs.insert(item.id)
+                                handleVisibleTargets(Array(visibleItemIDs))
+                                triggerLoadOlderIfNeeded()
+                            }
+                            .onDisappear {
+                                visibleItemIDs.remove(item.id)
+                            }
+                    }
 
-                if !viewModel.hasReachedNewest {
-                    Color.clear
-                        .frame(height: 1)
-                        .listRowInsets(EdgeInsets())
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                    if !viewModel.hasReachedNewest {
+                        Color.clear
+                            .frame(height: 1)
+                    }
                 }
+                .scrollTargetLayout()
             }
-            .scrollPosition($scrollPosition)
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .scrollContentBackground(.hidden)
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, 1)
-            .listRowSpacing(0)
             .transaction { transaction in
-                transaction.scrollPositionUpdatePreservesVelocity = true
                 transaction.scrollContentOffsetAdjustmentBehavior = .automatic
             }
             .overlay(alignment: .top) {
@@ -133,11 +123,10 @@ struct ChannelSheetView: View {
                 }
             }
             .onAppear {
-                if let target = viewportAnchorID {
-                    Task { @MainActor in
-                        try? await Task.sleep(for: .milliseconds(100))
-                        proxy.scrollTo(target, anchor: .center)
-                    }
+                scrollProxy = proxy
+                if let target = initialScrollTarget {
+                    initialScrollTarget = nil
+                    proxy.scrollTo(target.id, anchor: target.anchor)
                 }
             }
             .onScrollPhaseChange { _, newPhase in
@@ -246,7 +235,8 @@ struct ChannelSheetView: View {
     }
 
     private func triggerLoadOlderIfNeeded() {
-        guard let topAnchor = viewportAnchorID,
+        guard initialScrollTarget == nil,
+              let topAnchor = viewportAnchorID,
               loadOlderTask == nil else {
             return
         }
@@ -258,27 +248,13 @@ struct ChannelSheetView: View {
     }
 
     private func loadOlderIfNeededAtRest() {
-        guard let topAnchor = viewportAnchorID else { return }
+        guard initialScrollTarget == nil,
+              let topAnchor = viewportAnchorID else { return }
 
         loadOlderTask?.cancel()
         loadOlderTask = Task {
             defer { loadOlderTask = nil }
-            var anchor = topAnchor
-
-            while !Task.isCancelled {
-                let didLoad = await viewModel.loadOlderIfNeeded(currentPosition: anchor)
-                guard didLoad else { return }
-
-                let shouldContinue = await MainActor.run { () -> Bool in
-                    guard let currentAnchor = viewportAnchorID else {
-                        return false
-                    }
-                    anchor = currentAnchor
-                    return true
-                }
-
-                guard shouldContinue else { return }
-            }
+            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
         }
     }
 }
