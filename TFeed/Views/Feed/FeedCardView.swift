@@ -2,6 +2,7 @@ import SwiftUI
 
 struct FeedCardView: View {
     let item: FeedItem
+    var isRead: Bool = true
     var onChannelTap: (() -> Void)? = nil
     var onTelegramLinkTap: ((FeedItemID) -> Void)? = nil
     var onPostReferenceTap: ((FeedItem.PostReference) -> Void)? = nil
@@ -32,6 +33,12 @@ struct FeedCardView: View {
                     Text(relativeTime(for: item.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if !isRead {
+                        Circle()
+                            .fill(Color.accentColor)
+                            .frame(width: 6, height: 6)
+                    }
 
                     Spacer()
                 }

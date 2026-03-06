@@ -10,6 +10,7 @@ final class ChannelViewModel {
     var isLoadingNewer = false
     var hasReachedOldest = false
     var hasReachedNewest = false
+    var lastReadInboxMessageId: Int64 = 0
 
     let channelInfo: ChannelInfo
 
@@ -17,6 +18,7 @@ final class ChannelViewModel {
 
     private let initialWindow = 50
     private let pageSize = 30
+    private var markAsReadTask: Task<Void, Never>?
 
     init(channelInfo: ChannelInfo) {
         self.channelInfo = channelInfo
@@ -29,6 +31,11 @@ final class ChannelViewModel {
 
         hasReachedOldest = false
         hasReachedNewest = false
+
+        do {
+            let chat = try await TDLibService.shared.getChat(chatId: channelInfo.id)
+            lastReadInboxMessageId = chat.lastReadInboxMessageId
+        } catch {}
 
         let messages: [Message]
         if let aroundMessageId {
@@ -138,7 +145,42 @@ final class ChannelViewModel {
         items = normalizeItems(items + newItems)
     }
 
+    func isRead(_ item: FeedItem) -> Bool {
+        item.messageId <= lastReadInboxMessageId
+    }
+
+    func scheduleMarkAsRead(currentPosition: FeedItemID?) {
+        markAsReadTask?.cancel()
+        guard let currentPosition else { return }
+        markAsReadTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await markVisibleAsRead(currentPosition: currentPosition)
+        }
+    }
+
     // MARK: - Private
+
+    private func markVisibleAsRead(currentPosition: FeedItemID?) async {
+        guard let currentPosition,
+              let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
+
+        var unreadIds: [Int64] = []
+
+        for item in items.prefix(through: currentIndex) {
+            let ids = item.representedMessageIds.filter { $0 > lastReadInboxMessageId }
+            unreadIds.append(contentsOf: ids)
+        }
+
+        guard !unreadIds.isEmpty else { return }
+
+        do {
+            try await TDLibService.shared.viewMessages(chatId: channelInfo.id, messageIds: unreadIds)
+            if let maxMarked = unreadIds.max() {
+                lastReadInboxMessageId = max(lastReadInboxMessageId, maxMarked)
+            }
+        } catch {}
+    }
 
     private func fetchLatest(limit: Int) async -> [Message] {
         let latest = await fetchHistory(fromMessageId: 0, limit: 1)

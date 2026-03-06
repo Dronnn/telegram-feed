@@ -13,8 +13,10 @@ final class FeedViewModel {
     var errorMessage: String?
     var pendingScrollToItemID: FeedItemID?
     var initialAnchorID: FeedItemID?
+    private(set) var lastReadInboxMessageIDs: [Int64: Int64] = [:]
 
     private var listeningTask: Task<Void, Never>?
+    private var markAsReadTask: Task<Void, Never>?
     private var activeChannelIDs: Set<Int64> = []
     private var channelOldestMessageIDs: [Int64: Int64] = [:]
     private var channelsWithFullHistoryLoaded: Set<Int64> = []
@@ -361,7 +363,45 @@ final class FeedViewModel {
         pendingScrollToItemID = nil
     }
 
+    func isRead(_ item: FeedItem) -> Bool {
+        guard let lastRead = lastReadInboxMessageIDs[item.chatId] else { return false }
+        return item.messageId <= lastRead
+    }
+
+    func scheduleMarkAsRead(currentPosition: FeedItemID?) {
+        markAsReadTask?.cancel()
+        guard let currentPosition else { return }
+        markAsReadTask = Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled else { return }
+            await markVisibleAsRead(currentPosition: currentPosition)
+        }
+    }
+
     // MARK: - Private
+
+    private func markVisibleAsRead(currentPosition: FeedItemID?) async {
+        guard let currentPosition,
+              let currentIndex = items.firstIndex(where: { $0.id == currentPosition }) else { return }
+
+        var unreadByChat: [Int64: [Int64]] = [:]
+
+        for item in items.prefix(through: currentIndex) {
+            let lastRead = lastReadInboxMessageIDs[item.chatId] ?? 0
+            let unreadIds = item.representedMessageIds.filter { $0 > lastRead }
+            guard !unreadIds.isEmpty else { continue }
+            unreadByChat[item.chatId, default: []].append(contentsOf: unreadIds)
+        }
+
+        for (chatId, messageIds) in unreadByChat {
+            do {
+                try await TDLibService.shared.viewMessages(chatId: chatId, messageIds: messageIds)
+                let maxMarked = messageIds.max() ?? 0
+                let current = lastReadInboxMessageIDs[chatId] ?? 0
+                lastReadInboxMessageIDs[chatId] = max(current, maxMarked)
+            } catch {}
+        }
+    }
 
     private func loadChannels() async throws -> [Int64: ChannelInfo] {
         let chatIds = try await TDLibService.shared.getChats()
@@ -375,6 +415,7 @@ final class FeedViewModel {
                     title: chat.title,
                     avatarFileId: chat.photo?.small.id
                 )
+                lastReadInboxMessageIDs[chatId] = chat.lastReadInboxMessageId
             }
         }
 

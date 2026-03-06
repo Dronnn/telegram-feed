@@ -105,6 +105,9 @@ struct ChannelSheetView: View {
             // Trim excess items above
             viewModel.trimTopIfNeeded(currentPosition: pos)
 
+            // Mark visible messages as read
+            viewModel.scheduleMarkAsRead(currentPosition: pos)
+
             // Load newer when near bottom
             if let idx = viewModel.items.firstIndex(where: { $0.matches(pos) }),
                idx >= viewModel.items.count - 5, !viewModel.hasReachedNewest {
@@ -134,6 +137,13 @@ struct ChannelSheetView: View {
                 Text(relativeTime(for: item.date))
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if !viewModel.isRead(item) {
+                    Circle()
+                        .fill(Color.accentColor)
+                        .frame(width: 6, height: 6)
+                }
+
                 Spacer()
             }
 

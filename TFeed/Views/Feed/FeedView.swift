@@ -184,6 +184,7 @@ struct FeedView: View {
                     ForEach(viewModel.items) { item in
                         FeedCardView(
                             item: item,
+                            isRead: viewModel.isRead(item),
                             onChannelTap: { openChannel(for: item.id) },
                             onTelegramLinkTap: { target in openChannel(for: target) },
                             onPostReferenceTap: { reference in openChannel(for: reference.target) }
@@ -216,6 +217,7 @@ struct FeedView: View {
                 debounceSavePosition(newValue)
                 viewModel.updateScrollPosition(newValue)
                 viewModel.trimTopIfNeeded(currentPosition: newValue)
+                viewModel.scheduleMarkAsRead(currentPosition: newValue)
 
                 guard let pos = newValue, !isPerformingProgrammaticScroll else { return }
                 Task { await viewModel.loadOlderIfNeeded(currentPosition: pos) }
