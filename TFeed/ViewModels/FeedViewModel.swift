@@ -690,7 +690,7 @@ final class FeedViewModel {
         let dayMessages = uniqueMessages(messages)
             .filter { $0.date >= dayStart }
 
-        let ensuredMessages = await ensureLatestMessageIncluded(
+        let ensuredMessages = await ensureLatestDayTailIncluded(
             in: dayMessages,
             chatId: chatId,
             dayStart: dayStart
@@ -703,19 +703,23 @@ final class FeedViewModel {
         )
     }
 
-    private func ensureLatestMessageIncluded(
+    private func ensureLatestDayTailIncluded(
         in messages: [Message],
         chatId: Int64,
         dayStart: Int
     ) async -> [Message] {
-        let latest = await fetchHistoryBatch(chatId: chatId, fromMessageId: 0, limit: 1)
-        guard let newest = latest.first,
-              newest.date >= dayStart,
-              !messages.contains(where: { $0.id == newest.id }) else {
+        let recentTail = await fetchLatestMessages(chatId: chatId, limit: refreshPageSize)
+        let latestDayMessages = recentTail.filter { $0.date >= dayStart }
+
+        guard !latestDayMessages.isEmpty else {
             return messages
         }
 
-        return uniqueMessages(messages + [newest])
+        let merged = uniqueMessages(messages + latestDayMessages)
+        return merged.sorted { lhs, rhs in
+            if lhs.date != rhs.date { return lhs.date < rhs.date }
+            return lhs.id < rhs.id
+        }
     }
 
     private func applyIncomingMessage(_ message: Message, allowBuffering: Bool = true) {

@@ -52,3 +52,8 @@ Date: 2026-03-07
 - today's rebuild explicitly re-checks the latest message in each selected channel so the newest post is not dropped from the unified feed
 - real Telegram channel avatars now appear in feed cards, channel sheets, and settings, with initial-based fallback when no photo is available
 - public README and planning docs were updated to describe the current shipped behavior rather than older planning assumptions
+
+### Follow-up fixes
+
+- removed the explicit `.top` snap after upward pagination in the main feed so ordinary scroll completion no longer repositions the visible message
+- strengthened the current-day rebuild to merge the fresh per-channel tail, not just a single latest message, which reduces cases where channel details show a newer post than the unified feed

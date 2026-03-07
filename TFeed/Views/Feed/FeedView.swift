@@ -401,14 +401,8 @@ struct FeedView: View {
         hasLoadedSinceRest = true
         loadOlderTask?.cancel()
         loadOlderTask = Task { @MainActor in
-            let didLoad = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
             guard !Task.isCancelled else { return }
-
-            if didLoad, let resolvedAnchor = resolvedItemID(for: topAnchor) {
-                viewportAnchorID = resolvedAnchor
-                lastVisiblePosition = resolvedAnchor
-                scrollPosition = ScrollPosition(id: resolvedAnchor, anchor: .top)
-            }
 
             loadOlderTask = nil
         }

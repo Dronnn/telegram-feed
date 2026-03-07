@@ -18,8 +18,9 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 - **Channel avatars** — feed cards, channel sheets, and settings use the real Telegram channel photo when available, with an initial-based fallback
 - **Bottom refresh for today** — pull past the bottom edge and release to rebuild the feed for the current day across all selected channels, from local midnight to now
 - **Bounded upward loading** — when scrolling upward, older messages are added in small chunks while preserving the current viewport and without automatic feed jumps
+- **Complete fresh tail on rebuild** — a manual daily rebuild re-fetches the latest per-channel tail so the newest post from a selected channel is not lost from the unified feed
 - **Poll filtering** — Telegram polls are skipped instead of rendering as empty cards
-- **Stable viewport** — content insertions above and below the viewport do not shift the visible messages
+- **Stable viewport** — ordinary scrolling, upward pagination, and manual rebuilds do not intentionally snap the visible message to a different place
 - **Liquid Glass design** — built for iOS 26
 
 ## Requirements
