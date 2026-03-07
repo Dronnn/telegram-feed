@@ -10,6 +10,9 @@ struct FormattedTextView: View {
         Text(buildAttributedString())
             .font(.body)
             .foregroundStyle(Color(.label))
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .environment(\.openURL, OpenURLAction { url in
                 if url.scheme == "spoiler", let index = Int(url.host() ?? "") {
                     revealedSpoilers.insert(index)

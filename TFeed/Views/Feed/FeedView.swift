@@ -4,26 +4,27 @@ import SwiftData
 struct FeedView: View {
     @Environment(AppState.self) private var appState
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var viewModel = FeedViewModel()
     @State private var isContentReady = false
-    @State private var initialScrollTarget: (id: FeedItemID, anchor: UnitPoint)?
     @State private var pendingScrollID: FeedItemID?
     @State private var viewportAnchorID: FeedItemID?
     @State private var readingAnchorID: FeedItemID?
     @State private var lastVisiblePosition: FeedItemID?
     @State private var showSettings = false
-    @State private var selectedChannel: ChannelInfo?
-    @State private var selectedMessageId: FeedItemID?
+    @State private var presentedChannelTarget: PresentedChannelTarget?
     @State private var isApplyingChannelChanges = false
     @State private var isScrollActive = false
     @State private var isViewportAtBottom = true
     @State private var channelChangeTask: Task<Void, Never>?
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
-    @State private var visibleItemIDs: Set<FeedItemID> = []
     @State private var isRefreshing = false
     @State private var refreshTask: Task<Void, Never>?
+    @State private var hasLoadedSinceRest = false
+    @State private var scrollPosition = ScrollPosition()
+    private let bottomScrollAnchorID = "feed-bottom-anchor"
 
     var body: some View {
         NavigationStack {
@@ -66,10 +67,19 @@ struct FeedView: View {
             trimTask?.cancel()
             loadOlderTask?.cancel()
             refreshTask?.cancel()
+            channelChangeTask?.cancel()
             viewModel.stopListening()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                Task { await viewModel.flushPendingReadState() }
+            }
         }
         .onChange(of: appState.selectedChannelIDs) { _, newIDs in
             channelChangeTask?.cancel()
+            loadOlderTask?.cancel()
+            loadOlderTask = nil
+            hasLoadedSinceRest = false
             channelChangeTask = Task {
                 let previousItems = viewModel.items
                 let previousTarget = currentAnchorTarget()
@@ -97,8 +107,8 @@ struct FeedView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(channels: viewModel.channels)
         }
-        .sheet(item: $selectedChannel) { channel in
-            ChannelSheetView(channelInfo: channel, scrollTo: selectedMessageId) { chatId, lastReadMessageId in
+        .sheet(item: $presentedChannelTarget) { target in
+            ChannelSheetView(channelInfo: target.channel, scrollTo: target.messageId) { chatId, lastReadMessageId in
                 viewModel.syncReadState(
                     chatId: chatId,
                     lastReadMessageId: lastReadMessageId,
@@ -119,12 +129,12 @@ struct FeedView: View {
         if let anchorID = viewModel.initialAnchorID,
            let resolved = resolvedItemID(for: anchorID) {
             viewModel.initialAnchorID = nil
-            initialScrollTarget = (id: resolved, anchor: .center)
+            scrollPosition = ScrollPosition(id: resolved, anchor: .center)
             viewportAnchorID = resolved
             readingAnchorID = resolved
             lastVisiblePosition = resolved
         } else if let newest = viewModel.items.last {
-            initialScrollTarget = (id: newest.id, anchor: .bottom)
+            scrollPosition = ScrollPosition(id: newest.id, anchor: .bottom)
             viewportAnchorID = newest.id
             readingAnchorID = newest.id
             lastVisiblePosition = newest.id
@@ -186,7 +196,7 @@ struct FeedView: View {
     private var feedContent: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.items) { item in
                         FeedCardView(
                             item: item,
@@ -198,21 +208,19 @@ struct FeedView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 6)
                         .id(item.id)
-                        .onAppear {
-                            visibleItemIDs.insert(item.id)
-                            handleVisibleTargets(Array(visibleItemIDs))
-                            triggerLoadOlderIfNeeded()
-                        }
-                        .onDisappear {
-                            visibleItemIDs.remove(item.id)
-                        }
                     }
+
+                    Color.clear
+                        .frame(height: 1)
+                        .id(bottomScrollAnchorID)
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .scrollTargetLayout()
             }
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .transaction { transaction in
-                transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+            .scrollPosition($scrollPosition)
+            .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.01) { visibleIDs in
+                handleVisibleTargets(visibleIDs)
             }
             .overlay(alignment: .top) {
                 if viewModel.isLoadingMore {
@@ -226,21 +234,17 @@ struct FeedView: View {
                         .padding(.bottom, 8)
                 }
             }
-            .onAppear {
-                if let target = initialScrollTarget {
-                    initialScrollTarget = nil
-                    proxy.scrollTo(target.id, anchor: target.anchor)
-                }
-            }
             .onChange(of: pendingScrollID) { _, target in
                 guard let target else { return }
                 pendingScrollID = nil
-                proxy.scrollTo(target, anchor: .center)
+                scrollPosition.scrollTo(id: target, anchor: .center)
             }
             .onScrollPhaseChange { _, newPhase in
                 isScrollActive = newPhase.isScrolling
                 if newPhase.isScrolling {
+                    hasLoadedSinceRest = false
                     loadOlderTask?.cancel()
+                    loadOlderTask = nil
                 } else {
                     scheduleTrim(at: currentTopAnchorTarget())
                     loadOlderIfNeededAtRest()
@@ -272,15 +276,12 @@ struct FeedView: View {
             .overlay(alignment: .bottomTrailing) {
                 if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
                     Button {
-                        if let last = viewModel.items.last {
-                            withAnimation {
-                                proxy.scrollTo(last.id, anchor: .bottom)
-                            }
-                        }
+                        scrollToBottom(using: proxy)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "chevron.down")
                                 .font(.body.weight(.semibold))
+
                             if viewModel.unreadCount > 0 {
                                 Text("\(viewModel.unreadCount)")
                                     .font(.caption2.weight(.bold))
@@ -288,9 +289,13 @@ struct FeedView: View {
                         }
                         .padding(.horizontal, 14)
                         .padding(.vertical, 10)
+                        .background(Color.clear, in: Capsule())
                         .glassEffect(.regular.interactive(), in: .capsule)
+                        .contentShape(Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel("Scroll to bottom")
+                    .zIndex(1)
                     .transition(.scale.combined(with: .opacity))
                     .padding(20)
                 }
@@ -357,31 +362,18 @@ struct FeedView: View {
         return visibleIDs.sorted { (indexByID[$0] ?? .max) < (indexByID[$1] ?? .max) }
     }
 
-    private func triggerLoadOlderIfNeeded() {
-        guard initialScrollTarget == nil,
-              !isApplyingChannelChanges,
-              let topAnchor = viewportAnchorID,
-              loadOlderTask == nil else {
-            return
-        }
-
-        loadOlderTask = Task {
-            defer { loadOlderTask = nil }
-            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
-        }
-    }
-
     private func loadOlderIfNeededAtRest() {
-        guard initialScrollTarget == nil,
-              !isApplyingChannelChanges,
+        guard !isApplyingChannelChanges,
+              !hasLoadedSinceRest,
               let topAnchor = viewportAnchorID else {
             return
         }
 
+        hasLoadedSinceRest = true
         loadOlderTask?.cancel()
         loadOlderTask = Task {
-            defer { loadOlderTask = nil }
             _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+            if !Task.isCancelled { loadOlderTask = nil }
         }
     }
 
@@ -396,6 +388,12 @@ struct FeedView: View {
             async let minimumDelay: () = Task.sleep(for: .milliseconds(800))
             _ = await (refreshResult, try? minimumDelay)
             isRefreshing = false
+        }
+    }
+
+    private func scrollToBottom(using proxy: ScrollViewProxy) {
+        withAnimation {
+            proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
         }
     }
 
@@ -436,7 +434,15 @@ struct FeedView: View {
 
     private func openChannel(for target: FeedItemID) {
         guard let channel = viewModel.channels[target.chatId] else { return }
-        selectedMessageId = target
-        selectedChannel = channel
+        presentedChannelTarget = PresentedChannelTarget(channel: channel, messageId: target)
+    }
+}
+
+private struct PresentedChannelTarget: Identifiable {
+    let channel: ChannelInfo
+    let messageId: FeedItemID
+
+    var id: String {
+        "\(channel.id):\(messageId.messageId)"
     }
 }

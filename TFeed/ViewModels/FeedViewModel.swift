@@ -17,6 +17,7 @@ final class FeedViewModel {
 
     private var listeningTask: Task<Void, Never>?
     private var markAsReadTask: Task<Void, Never>?
+    private(set) var lastScheduledReadPosition: FeedItemID?
     private var activeChannelIDs: Set<Int64> = []
     private var channelOldestMessageIDs: [Int64: Int64] = [:]
     private var channelsWithFullHistoryLoaded: Set<Int64> = []
@@ -24,8 +25,8 @@ final class FeedViewModel {
     private var deferredOlderItems: [FeedItem] = []
 
     private let initialLoadLimit = 30
-    private let restoreBackfillLimit = 100
     private let refreshPageSize = 50
+    private let historyFetchPadding = 8
     static let upwardBufferSize = 30
     private static let upwardTrimThreshold = upwardBufferSize + 15
     private static let upwardLoadTriggerThreshold = 5
@@ -68,10 +69,7 @@ final class FeedViewModel {
             await withTaskGroup(of: ChannelLoadResult.self) { group in
                 for chatId in activeIDs {
                     group.addTask {
-                        await self.loadInitialMessages(
-                            chatId: chatId,
-                            restoreContext: nil
-                        )
+                        await self.loadInitialMessages(chatId: chatId)
                     }
                 }
 
@@ -103,6 +101,7 @@ final class FeedViewModel {
     }
 
     func loadOlderIfNeeded(currentPosition: FeedItemID?) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard let currentPosition,
               let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) else {
             return false
@@ -123,91 +122,82 @@ final class FeedViewModel {
     }
 
     private func loadOlder(deficit: Int, before anchorItem: FeedItem? = nil) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard !isLoadingMore, !activeChannelIDs.isEmpty else { return false }
         isLoadingMore = true
         defer { isLoadingMore = false }
 
-        for _ in 0..<6 {
-            let activeIDs = activeChannelIDs.subtracting(channelsWithFullHistoryLoaded)
-            guard !activeIDs.isEmpty else { return false }
+        let activeIDs = activeChannelIDs.subtracting(channelsWithFullHistoryLoaded)
+        guard !activeIDs.isEmpty else { return false }
 
-            let numChannels = max(activeIDs.count, 1)
-            let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
+        let numChannels = max(activeIDs.count, 1)
+        let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
 
-            var olderMessagesByChannel: [Int64: [Message]] = [:]
+        var olderMessagesByChannel: [Int64: [Message]] = [:]
 
-            await withTaskGroup(of: (Int64, [Message]).self) { group in
-                for chatId in activeIDs {
-                    guard let fromMessageId = channelOldestMessageIDs[chatId], fromMessageId != 0 else { continue }
-                    group.addTask {
-                        let messages = await self.fetchMessages(
-                            chatId: chatId,
-                            fromMessageId: fromMessageId,
-                            limit: perChannelLimit
-                        )
-                        return (chatId, messages)
-                    }
-                }
-
-                for await (chatId, messages) in group {
-                    olderMessagesByChannel[chatId] = messages
+        await withTaskGroup(of: (Int64, [Message]).self) { group in
+            for chatId in activeIDs {
+                guard let fromMessageId = channelOldestMessageIDs[chatId], fromMessageId != 0 else { continue }
+                group.addTask {
+                    guard !Task.isCancelled else { return (chatId, []) }
+                    let messages = await self.fetchMessages(
+                        chatId: chatId,
+                        fromMessageId: fromMessageId,
+                        limit: perChannelLimit
+                    )
+                    guard !Task.isCancelled else { return (chatId, []) }
+                    return (chatId, messages)
                 }
             }
 
-            let existingMessageIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
-            var additions: [FeedItem] = []
-            var bufferedDeferredItems = false
-            var advancedAnyCursor = false
-
-            for (chatId, messages) in olderMessagesByChannel {
-                if let oldest = messages.map(\.id).min() {
-                    let previous = channelOldestMessageIDs[chatId] ?? .max
-                    channelOldestMessageIDs[chatId] = min(previous, oldest)
-                    if oldest < previous {
-                        advancedAnyCursor = true
-                    }
-                }
-
-                if messages.isEmpty || messages.count <= 1 {
-                    channelsWithFullHistoryLoaded.insert(chatId)
-                    continue
-                }
-
-                let uniqueMessages = messages.filter {
-                    !existingMessageIDs.contains(FeedItemID(chatId: chatId, messageId: $0.id))
-                }
-                let unique = makeItems(from: uniqueMessages)
-
-                guard !unique.isEmpty else { continue }
-
-                if let anchorItem {
-                    let safeItems = unique.filter { $0 < anchorItem }
-                    let deferredItems = unique.filter { !($0 < anchorItem) }
-                    additions.append(contentsOf: safeItems)
-                    if !deferredItems.isEmpty {
-                        bufferDeferredOlderItems(deferredItems)
-                        bufferedDeferredItems = true
-                    }
-                } else {
-                    additions.append(contentsOf: unique)
-                }
-            }
-
-            if !additions.isEmpty {
-                insertItemsMerged(additions)
-                return true
-            }
-
-            if bufferedDeferredItems {
-                return true
-            }
-
-            if !advancedAnyCursor {
-                return false
+            for await (chatId, messages) in group {
+                olderMessagesByChannel[chatId] = messages
             }
         }
 
-        return false
+        guard !Task.isCancelled else { return false }
+
+        let existingMessageIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
+        var additions: [FeedItem] = []
+        var bufferedDeferredItems = false
+
+        for (chatId, messages) in olderMessagesByChannel {
+            if let oldest = messages.map(\.id).min() {
+                let previous = channelOldestMessageIDs[chatId] ?? .max
+                channelOldestMessageIDs[chatId] = min(previous, oldest)
+            }
+
+            if messages.isEmpty || messages.count <= 1 {
+                channelsWithFullHistoryLoaded.insert(chatId)
+                continue
+            }
+
+            let uniqueMessages = messages.filter {
+                !existingMessageIDs.contains(FeedItemID(chatId: chatId, messageId: $0.id))
+            }
+            let unique = makeItems(from: uniqueMessages)
+
+            guard !unique.isEmpty else { continue }
+
+            if let anchorItem {
+                let safeItems = unique.filter { $0 < anchorItem }
+                let deferredItems = unique.filter { !($0 < anchorItem) }
+                additions.append(contentsOf: safeItems)
+                if !deferredItems.isEmpty {
+                    bufferDeferredOlderItems(deferredItems)
+                    bufferedDeferredItems = true
+                }
+            } else {
+                additions.append(contentsOf: unique)
+            }
+        }
+
+        if !additions.isEmpty {
+            insertItemsMerged(additions)
+            return true
+        }
+
+        return bufferedDeferredItems
     }
 
     func refresh(selectedIDs: Set<Int64>, currentPosition: FeedItemID? = nil) async {
@@ -251,7 +241,7 @@ final class FeedViewModel {
                     )
                     lastReadInboxMessageIDs[chatId] = chat.lastReadInboxMessageId
                 }
-            } catch {}
+            } catch { print("[FeedViewModel] Failed to load chat \(chatId): \(error)") }
         }
 
         let validNewIDs = newIDs.intersection(Set(channels.keys))
@@ -285,7 +275,7 @@ final class FeedViewModel {
                     if let oldest = messages.map(\.id).min() {
                         channelOldestMessageIDs[chatId] = oldest
                     }
-                    if messages.count < initialLoadLimit {
+                    if messages.count < initialLoadLimit + historyFetchPadding {
                         channelsWithFullHistoryLoaded.insert(chatId)
                     }
                     added.append(contentsOf: makeItems(from: messages))
@@ -369,12 +359,26 @@ final class FeedViewModel {
 
     func scheduleMarkAsRead(currentPosition: FeedItemID?) {
         markAsReadTask?.cancel()
-        guard let currentPosition else { return }
+        guard let currentPosition else {
+            lastScheduledReadPosition = nil
+            return
+        }
+        lastScheduledReadPosition = currentPosition
         markAsReadTask = Task {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
             await markVisibleAsRead(currentPosition: currentPosition)
+            if lastScheduledReadPosition == currentPosition {
+                lastScheduledReadPosition = nil
+            }
         }
+    }
+
+    func flushPendingReadState() async {
+        markAsReadTask?.cancel()
+        guard let position = lastScheduledReadPosition else { return }
+        lastScheduledReadPosition = nil
+        await markVisibleAsRead(currentPosition: position)
     }
 
     // MARK: - Private
@@ -398,7 +402,7 @@ final class FeedViewModel {
                 let maxMarked = messageIds.max() ?? 0
                 let current = lastReadInboxMessageIDs[chatId] ?? 0
                 lastReadInboxMessageIDs[chatId] = max(current, maxMarked)
-            } catch {}
+            } catch { print("markVisibleAsRead failed: \(error)") }
         }
     }
 
@@ -422,137 +426,50 @@ final class FeedViewModel {
     }
 
     private func fetchLatestMessages(chatId: Int64, limit: Int) async -> [Message] {
+        guard !Task.isCancelled else { return [] }
         do {
             let latest = try await TDLibService.shared.getChatHistory(chatId: chatId, limit: 1)
             guard let newest = latest.first else { return [] }
-            return try await TDLibService.shared.getChatHistory(
+            let messages = try await TDLibService.shared.getChatHistory(
                 chatId: chatId,
                 fromMessageId: newest.id,
-                limit: limit
+                limit: limit + historyFetchPadding
             )
+            guard !Task.isCancelled else { return [] }
+            return messages
         } catch {
             return []
         }
     }
 
     private func fetchMessages(chatId: Int64, fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
+        guard !Task.isCancelled else { return [] }
         do {
-            return try await TDLibService.shared.getChatHistory(
+            let messages = try await TDLibService.shared.getChatHistory(
                 chatId: chatId,
                 fromMessageId: fromMessageId,
-                limit: limit,
+                limit: limit + historyFetchPadding,
                 offset: offset
             )
+            guard !Task.isCancelled else { return [] }
+            return messages
         } catch {
             return []
         }
     }
 
-    private func ensureRestoredMessage(_ restoredPosition: FeedItemID, in messages: [Message]) async -> [Message] {
-        if messages.contains(where: { $0.id == restoredPosition.messageId }) {
-            return messages
-        }
-
-        let exact = await fetchMessages(
-            chatId: restoredPosition.chatId,
-            fromMessageId: restoredPosition.messageId,
-            limit: 1
-        )
-        guard let message = exact.first(where: { $0.id == restoredPosition.messageId }) else {
-            return messages
-        }
-        return messages + [message]
-    }
-
-    private func loadRestoreContext(
-        for restoredPosition: FeedItemID?
-    ) async -> RestoreContext? {
-        guard let restoredPosition else {
-            return nil
-        }
-
-        if let message = await fetchExactMessage(
-            chatId: restoredPosition.chatId,
-            messageId: restoredPosition.messageId
-        ) {
-            return RestoreContext(
-                position: restoredPosition,
-                date: message.date
-            )
-        }
-
-        if let savedDate = ScrollPositionStore.loadDate(), savedDate > 0 {
-            return RestoreContext(
-                position: restoredPosition,
-                date: savedDate
-            )
-        }
-
-        return nil
-    }
-
     private func loadInitialMessages(
-        chatId: Int64,
-        restoreContext: RestoreContext?
+        chatId: Int64
     ) async -> ChannelLoadResult {
         let latest = await fetchLatestMessages(chatId: chatId, limit: initialLoadLimit)
-        var messages = uniqueMessages(latest)
-        var reachedOldest = latest.count < initialLoadLimit
-
-        guard let restoreContext, chatId == restoreContext.position.chatId else {
-            return ChannelLoadResult(
-                chatId: chatId,
-                messages: messages,
-                reachedOldest: reachedOldest
-            )
-        }
-
-        var seenIDs = Set(messages.map(\.id))
-        let maxBackfillIterations = 5
-        var backfillIterations = 0
-
-        while !reachedOldest && !messages.contains(where: { $0.id == restoreContext.position.messageId }) {
-            backfillIterations += 1
-            if backfillIterations > maxBackfillIterations { break }
-            guard let oldestMessageId = messages.map(\.id).min() else { break }
-            let olderBatch = await fetchMessages(
-                chatId: chatId,
-                fromMessageId: oldestMessageId,
-                limit: restoreBackfillLimit
-            )
-            let uniqueOlder = olderBatch.filter { seenIDs.insert($0.id).inserted }
-
-            if uniqueOlder.isEmpty {
-                reachedOldest = true
-                break
-            }
-
-            messages.append(contentsOf: uniqueOlder)
-            if olderBatch.count <= 1 {
-                reachedOldest = true
-            }
-        }
-
-        let restoredBatch = await ensureRestoredMessage(
-            restoreContext.position,
-            in: messages
-        )
-        messages = uniqueMessages(restoredBatch)
+        let messages = uniqueMessages(latest)
+        let reachedOldest = latest.count < initialLoadLimit + historyFetchPadding
 
         return ChannelLoadResult(
             chatId: chatId,
             messages: messages,
             reachedOldest: reachedOldest
         )
-    }
-
-    private func fetchExactMessage(chatId: Int64, messageId: Int64) async -> Message? {
-        let exact = await fetchMessages(
-            chatId: chatId,
-            fromMessageId: messageId,
-            limit: 1
-        )
-        return exact.first(where: { $0.id == messageId })
     }
 
     private func applyIncomingMessage(_ message: Message, allowBuffering: Bool = true) {
@@ -564,7 +481,7 @@ final class FeedViewModel {
             return
         }
 
-        let item = makeItem(from: message)
+        guard let item = makeItem(from: message) else { return }
         guard !representedMessageIDs(in: items, chatId: message.chatId).contains(item.id) else {
             return
         }
@@ -584,11 +501,12 @@ final class FeedViewModel {
         bufferedIncomingMessages.removeAll()
         guard !pending.isEmpty else { return }
         let sorted = pending.sorted(by: { $0.id < $1.id })
-        let newItems = sorted.map { makeItem(from: $0) }
+        let newItems = sorted.compactMap { makeItem(from: $0) }
         insertItemsMerged(newItems)
     }
 
-    private func makeItem(from message: Message) -> FeedItem {
+    private func makeItem(from message: Message) -> FeedItem? {
+        guard message.content.shouldAppearInFeed else { return nil }
         let channel = channels[message.chatId]
         let mediaInfo = message.content.extractMediaInfo()
 
@@ -607,7 +525,7 @@ final class FeedViewModel {
     }
 
     private func makeItems(from messages: [Message]) -> [FeedItem] {
-        normalizeItems(messages.map { makeItem(from: $0) })
+        normalizeItems(messages.compactMap { makeItem(from: $0) })
     }
 
     private func insertItemsMerged(_ newItems: [FeedItem]) {
@@ -647,6 +565,7 @@ final class FeedViewModel {
     }
 
     private func flushDeferredOlderItems(before anchorItem: FeedItem) -> Bool {
+        guard !Task.isCancelled else { return false }
         let itemsToInsert = deferredOlderItems.filter { $0 < anchorItem }
         guard !itemsToInsert.isEmpty else { return false }
 
@@ -657,11 +576,10 @@ final class FeedViewModel {
     }
 
     private func preferredInitialAnchorID() -> FeedItemID? {
-        let sorted = items.sorted()
-        if let firstUnread = sorted.first(where: { !isRead($0) }) {
+        if let firstUnread = items.first(where: { !isRead($0) }) {
             return firstUnread.id
         }
-        return sorted.last?.id
+        return items.last?.id
     }
 
     private func prepareWindow(
@@ -811,7 +729,7 @@ final class FeedViewModel {
 
             collected.append(contentsOf: newerMessages)
 
-            guard batch.count >= refreshPageSize,
+            guard batch.count >= refreshPageSize + historyFetchPadding,
                   let nextCursor = newerMessages.map(\.id).max(),
                   nextCursor > cursor else {
                 break
@@ -884,11 +802,6 @@ final class FeedViewModel {
                 }
         )
     }
-}
-
-private struct RestoreContext: Sendable {
-    let position: FeedItemID
-    let date: Int
 }
 
 private struct ChannelLoadResult: Sendable {

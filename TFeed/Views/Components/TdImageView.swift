@@ -3,6 +3,7 @@ import SwiftUI
 struct TdImageView: View {
     let fileId: Int
     let minithumbnail: Data?
+    var fallbackAspectRatio: CGFloat? = nil
 
     @State private var image: UIImage?
     @State private var isLoading = false
@@ -12,11 +13,11 @@ struct TdImageView: View {
             if let image {
                 Image(uiImage: image)
                     .resizable()
-                    .scaledToFill()
-            } else if let minithumbnail, let blurImage = UIImage(data: minithumbnail) {
-                Image(uiImage: blurImage)
+                    .scaledToFit()
+            } else if let thumbnailImage {
+                Image(uiImage: thumbnailImage)
                     .resizable()
-                    .scaledToFill()
+                    .scaledToFit()
                     .blur(radius: 10)
             } else {
                 Color(.tertiarySystemFill)
@@ -26,10 +27,33 @@ struct TdImageView: View {
                 ProgressView()
             }
         }
+        .aspectRatio(resolvedAspectRatio, contentMode: .fit)
+        .frame(maxWidth: .infinity)
         .clipped()
         .task(id: fileId) {
             await loadImage()
         }
+    }
+
+    private var thumbnailImage: UIImage? {
+        guard let minithumbnail else { return nil }
+        return UIImage(data: minithumbnail)
+    }
+
+    private var resolvedAspectRatio: CGFloat {
+        if let image, image.size.height > 0 {
+            return image.size.width / image.size.height
+        }
+
+        if let thumbnailImage, thumbnailImage.size.height > 0 {
+            return thumbnailImage.size.width / thumbnailImage.size.height
+        }
+
+        if let fallbackAspectRatio, fallbackAspectRatio > 0 {
+            return fallbackAspectRatio
+        }
+
+        return 1
     }
 
     private func loadImage() async {

@@ -51,8 +51,11 @@ struct MediaContentView: View {
 
     @ViewBuilder
     private func photoView(_ info: MediaInfo.PhotoMediaInfo, allowsFullscreenTap: Bool) -> some View {
-        TdImageView(fileId: info.fileId, minithumbnail: info.minithumbnail)
-            .aspectRatio(aspectRatioValue(width: info.width, height: info.height), contentMode: .fit)
+        TdImageView(
+            fileId: info.fileId,
+            minithumbnail: info.minithumbnail,
+            fallbackAspectRatio: aspectRatioValue(width: info.width, height: info.height)
+        )
             .frame(maxHeight: inlineMediaHeight(width: info.width, height: info.height))
             .frame(maxWidth: .infinity)
             .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))

@@ -6,14 +6,17 @@ struct ChannelSheetView: View {
     var onReadStateChanged: ((Int64, Int64) -> Void)?
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel: ChannelViewModel
     @State private var viewportAnchorID: FeedItemID?
     @State private var isContentReady = false
     @State private var isScrollActive = false
     @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
-    @State private var visibleItemIDs: Set<FeedItemID> = []
-    @State private var initialScrollTarget: (id: FeedItemID, anchor: UnitPoint)?
+    @State private var hasLoadedSinceRest = false
+    @State private var scrollPosition = ScrollPosition()
+    @State private var initialScrollTarget: FeedItemID?
+    @State private var hasAppliedInitialScroll = false
 
     init(channelInfo: ChannelInfo, scrollTo messageId: FeedItemID? = nil, onReadStateChanged: ((Int64, Int64) -> Void)? = nil) {
         self.channelInfo = channelInfo
@@ -57,14 +60,32 @@ struct ChannelSheetView: View {
         .onDisappear {
             trimTask?.cancel()
             loadOlderTask?.cancel()
-            onReadStateChanged?(channelInfo.id, viewModel.lastReadInboxMessageId)
+            Task {
+                await viewModel.flushPendingReadState()
+                onReadStateChanged?(channelInfo.id, viewModel.lastReadInboxMessageId)
+            }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .background || newPhase == .inactive {
+                Task { await viewModel.flushPendingReadState() }
+            }
         }
         .task {
-            await viewModel.load(aroundMessageId: initialMessageId?.messageId)
-            if let target = resolvedInitialScrollTarget() {
-                viewportAnchorID = target
-                initialScrollTarget = (id: target, anchor: .center)
+            viewportAnchorID = nil
+            initialScrollTarget = nil
+            hasAppliedInitialScroll = false
+            isContentReady = false
+
+            let resolvedTarget = await viewModel.load(aroundMessageId: initialMessageId?.messageId)
+            guard !Task.isCancelled else { return }
+
+            if initialMessageId != nil {
+                guard let resolvedTarget else { return }
+                initialScrollTarget = resolvedTarget
+            } else {
+                initialScrollTarget = resolvedTarget
             }
+
             isContentReady = true
         }
     }
@@ -83,19 +104,11 @@ struct ChannelSheetView: View {
     private var messageList: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(viewModel.items) { item in
                         channelRow(item: item)
                             .padding(.horizontal, 16)
                             .padding(.vertical, 6)
-                            .onAppear {
-                                visibleItemIDs.insert(item.id)
-                                handleVisibleTargets(Array(visibleItemIDs))
-                                triggerLoadOlderIfNeeded()
-                            }
-                            .onDisappear {
-                                visibleItemIDs.remove(item.id)
-                            }
                     }
 
                     if !viewModel.hasReachedNewest {
@@ -103,11 +116,13 @@ struct ChannelSheetView: View {
                             .frame(height: 1)
                     }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .scrollTargetLayout()
             }
             .scrollEdgeEffectStyle(.soft, for: .all)
-            .transaction { transaction in
-                transaction.scrollContentOffsetAdjustmentBehavior = .automatic
+            .scrollPosition($scrollPosition)
+            .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.01) { visibleIDs in
+                handleVisibleTargets(visibleIDs)
             }
             .overlay(alignment: .top) {
                 if viewModel.isLoadingOlder {
@@ -121,16 +136,12 @@ struct ChannelSheetView: View {
                         .padding(.bottom, 8)
                 }
             }
-            .onAppear {
-                if let target = initialScrollTarget {
-                    initialScrollTarget = nil
-                    proxy.scrollTo(target.id, anchor: target.anchor)
-                }
-            }
             .onScrollPhaseChange { _, newPhase in
                 isScrollActive = newPhase.isScrolling
                 if newPhase.isScrolling {
+                    hasLoadedSinceRest = false
                     loadOlderTask?.cancel()
+                    loadOlderTask = nil
                 } else {
                     scheduleTrim(at: viewportAnchorID)
                     loadOlderIfNeededAtRest()
@@ -147,6 +158,9 @@ struct ChannelSheetView: View {
                     Task { await viewModel.loadNewer() }
                 }
             )
+            .task(id: initialScrollTarget) {
+                await applyInitialScroll(using: proxy)
+            }
         }
     }
 
@@ -182,6 +196,7 @@ struct ChannelSheetView: View {
             ReactionsBarView(reactions: item.reactions)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
     }
 
@@ -216,13 +231,6 @@ struct ChannelSheetView: View {
         viewModel.scheduleMarkAsRead(currentPosition: readingAnchor ?? topAnchor)
     }
 
-    private func resolvedInitialScrollTarget() -> FeedItemID? {
-        if let initialMessageId {
-            return viewModel.items.first(where: { $0.matches(initialMessageId) })?.id
-        }
-        return viewModel.items.last?.id
-    }
-
     private func orderedVisibleTargets(from visibleIDs: [FeedItemID]) -> [FeedItemID] {
         let indexByID = Dictionary(uniqueKeysWithValues: viewModel.items.enumerated().map { ($1.id, $0) })
         return visibleIDs.sorted { (indexByID[$0] ?? .max) < (indexByID[$1] ?? .max) }
@@ -232,27 +240,37 @@ struct ChannelSheetView: View {
         viewModel.items.first(where: { $0.matches(target) })?.id
     }
 
-    private func triggerLoadOlderIfNeeded() {
-        guard initialScrollTarget == nil,
-              let topAnchor = viewportAnchorID,
-              loadOlderTask == nil else {
-            return
-        }
+    private func loadOlderIfNeededAtRest() {
+        guard !hasLoadedSinceRest,
+              let topAnchor = viewportAnchorID else { return }
 
+        hasLoadedSinceRest = true
+        loadOlderTask?.cancel()
         loadOlderTask = Task {
-            defer { loadOlderTask = nil }
             _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+            if !Task.isCancelled { loadOlderTask = nil }
         }
     }
 
-    private func loadOlderIfNeededAtRest() {
-        guard initialScrollTarget == nil,
-              let topAnchor = viewportAnchorID else { return }
+    private func applyInitialScroll(using proxy: ScrollViewProxy) async {
+        guard isContentReady,
+              let target = initialScrollTarget,
+              !hasAppliedInitialScroll else { return }
 
-        loadOlderTask?.cancel()
-        loadOlderTask = Task {
-            defer { loadOlderTask = nil }
-            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
-        }
+        hasAppliedInitialScroll = true
+        viewportAnchorID = target
+
+        await Task.yield()
+        await Task.yield()
+
+        proxy.scrollTo(
+            target,
+            anchor: initialMessageId == nil ? .bottom : .top
+        )
+
+        scrollPosition = ScrollPosition(
+            id: target,
+            anchor: initialMessageId == nil ? .bottom : .top
+        )
     }
 }

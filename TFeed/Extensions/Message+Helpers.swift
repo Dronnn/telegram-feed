@@ -2,6 +2,15 @@ import Foundation
 import TDLibKit
 
 extension MessageContent {
+    var shouldAppearInFeed: Bool {
+        switch self {
+        case .messagePoll:
+            return false
+        default:
+            return true
+        }
+    }
+
     func extractFormattedText() -> FormattedText? {
         switch self {
         case .messageText(let messageText):

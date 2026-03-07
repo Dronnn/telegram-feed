@@ -48,6 +48,7 @@ struct FeedCardView: View {
                 }
             }
             .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
 
             // Text content
             if let formattedText = item.formattedText, !formattedText.text.isEmpty {
@@ -69,16 +70,24 @@ struct FeedCardView: View {
             Button {
                 onPostReferenceTap?(item.postReference)
             } label: {
-                Text(item.postReference.label)
-                    .font(.caption)
-                    .foregroundStyle(Color.accentColor)
-                    .underline()
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.turn.down.right")
+                        .font(.caption.weight(.semibold))
+
+                    Text(item.postReference.label)
+                        .font(.caption.weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .foregroundStyle(Color.accentColor)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .background(Color.accentColor.opacity(0.12), in: Capsule())
             }
             .buttonStyle(.plain)
         }
         .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: .rect(cornerRadius: 20))
     }
 

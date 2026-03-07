@@ -21,6 +21,7 @@ final class ChannelViewModel {
 
     private let initialWindow = 50
     private let pageSize = 30
+    private(set) var lastScheduledReadPosition: FeedItemID?
     private var markAsReadTask: Task<Void, Never>?
     private var oldestHistoryCursor: Int64?
 
@@ -28,8 +29,8 @@ final class ChannelViewModel {
         self.channelInfo = channelInfo
     }
 
-    func load(aroundMessageId: Int64? = nil) async {
-        guard !isLoading else { return }
+    func load(aroundMessageId: Int64? = nil) async -> FeedItemID? {
+        guard !isLoading else { return nil }
         isLoading = true
         defer { isLoading = false }
 
@@ -39,16 +40,15 @@ final class ChannelViewModel {
         do {
             let chat = try await TDLibService.shared.getChat(chatId: channelInfo.id)
             lastReadInboxMessageId = chat.lastReadInboxMessageId
-        } catch {}
+        } catch { print("ChannelViewModel: failed to load chat info: \(error)") }
 
         let messages: [Message]
         if let aroundMessageId {
-            let around = await fetchWindow(aroundMessageId: aroundMessageId)
-            if around.isEmpty {
+            if let exactMessage = await fetchExactMessage(messageId: aroundMessageId) {
+                messages = await fetchWindow(around: exactMessage)
+            } else {
                 messages = await fetchLatest(limit: initialWindow)
                 hasReachedNewest = true
-            } else {
-                messages = around
             }
         } else {
             messages = await fetchLatest(limit: initialWindow)
@@ -69,9 +69,16 @@ final class ChannelViewModel {
             items = normalizeItems(mappedItems)
         }
         oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+
+        guard let aroundMessageId else {
+            return items.last?.id
+        }
+
+        return await ensureTargetLoaded(messageId: aroundMessageId)
     }
 
     func loadOlderIfNeeded(currentPosition: FeedItemID?) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard let currentPosition,
               let itemsAbove = items.firstIndex(where: { $0.matches(currentPosition) }) else {
             return false
@@ -95,6 +102,7 @@ final class ChannelViewModel {
     }
 
     private func loadOlderByDeficit(_ deficit: Int) async -> Bool {
+        guard !Task.isCancelled else { return false }
         guard !isLoadingOlder, !hasReachedOldest,
               let startingCursor = oldestHistoryCursor ?? items.first?.representedMessageIds.min() ?? items.first?.messageId else {
             return false
@@ -103,41 +111,34 @@ final class ChannelViewModel {
         defer { isLoadingOlder = false }
 
         let fetchLimit = max(deficit, pageSize)
-        var cursor = startingCursor
 
-        for _ in 0..<6 {
-            let previousCursor = cursor
-            let messages = await fetchHistory(
-                fromMessageId: cursor,
-                limit: fetchLimit
-            )
+        let messages = await fetchHistory(
+            fromMessageId: startingCursor,
+            limit: fetchLimit
+        )
 
-            if let fetchedOldest = messages.map(\.id).min() {
-                oldestHistoryCursor = min(oldestHistoryCursor ?? .max, fetchedOldest)
-                if fetchedOldest < cursor {
-                    cursor = fetchedOldest
-                }
+        guard !Task.isCancelled else { return false }
+
+        if let fetchedOldest = messages.map(\.id).min() {
+            oldestHistoryCursor = min(oldestHistoryCursor ?? .max, fetchedOldest)
+        }
+
+        if messages.isEmpty || messages.count <= 1 {
+            hasReachedOldest = true
+            return false
+        }
+
+        let existingMessageIDs = representedMessageIDs(in: items)
+        let newItems = makeItems(
+            from: messages.filter {
+                !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
             }
+        )
 
-            if messages.isEmpty || messages.count <= 1 {
-                hasReachedOldest = true
-                return false
-            }
-
-            let existingMessageIDs = representedMessageIDs(in: items)
-            let newItems = makeItems(
-                from: messages.filter {
-                    !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
-                }
-            )
-
-            if !newItems.isEmpty {
-                insertItemsMerged(newItems)
-                oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
-                return true
-            }
-
-            guard cursor < previousCursor else { return false }
+        if !newItems.isEmpty {
+            insertItemsMerged(newItems)
+            oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+            return true
         }
 
         return false
@@ -172,7 +173,9 @@ final class ChannelViewModel {
             hasReachedNewest = true
         }
 
-        guard !newItems.isEmpty else { return }
+        guard !newItems.isEmpty else {
+            return
+        }
 
         insertItemsMerged(newItems)
     }
@@ -183,12 +186,26 @@ final class ChannelViewModel {
 
     func scheduleMarkAsRead(currentPosition: FeedItemID?) {
         markAsReadTask?.cancel()
-        guard let currentPosition else { return }
+        guard let currentPosition else {
+            lastScheduledReadPosition = nil
+            return
+        }
+        lastScheduledReadPosition = currentPosition
         markAsReadTask = Task {
             try? await Task.sleep(for: .seconds(1))
             guard !Task.isCancelled else { return }
             await markVisibleAsRead(currentPosition: currentPosition)
+            if lastScheduledReadPosition == currentPosition {
+                lastScheduledReadPosition = nil
+            }
         }
+    }
+
+    func flushPendingReadState() async {
+        markAsReadTask?.cancel()
+        guard let position = lastScheduledReadPosition else { return }
+        lastScheduledReadPosition = nil
+        await markVisibleAsRead(currentPosition: position)
     }
 
     // MARK: - Private
@@ -211,7 +228,7 @@ final class ChannelViewModel {
             if let maxMarked = unreadIds.max() {
                 lastReadInboxMessageId = max(lastReadInboxMessageId, maxMarked)
             }
-        } catch {}
+        } catch { print("markVisibleAsRead failed: \(error)") }
     }
 
     private func fetchLatest(limit: Int) async -> [Message] {
@@ -221,37 +238,33 @@ final class ChannelViewModel {
     }
 
     private func fetchHistory(fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
+        guard !Task.isCancelled else { return [] }
         do {
-            return try await TDLibService.shared.getChatHistory(
+            let messages = try await TDLibService.shared.getChatHistory(
                 chatId: channelInfo.id,
                 fromMessageId: fromMessageId,
                 limit: limit,
                 offset: offset
             )
+            guard !Task.isCancelled else { return [] }
+            return messages
         } catch {
             return []
         }
     }
 
     private func fetchExactMessage(messageId: Int64) async -> Message? {
-        let exact = await fetchHistory(fromMessageId: messageId, limit: 1, offset: 0)
-        return exact.first(where: { $0.id == messageId })
+        do {
+            return try await TDLibService.shared.getMessage(
+                chatId: channelInfo.id,
+                messageId: messageId
+            )
+        } catch {
+            return nil
+        }
     }
 
-    private func fetchWindow(aroundMessageId: Int64) async -> [Message] {
-        let around = await fetchHistory(
-            fromMessageId: aroundMessageId,
-            limit: initialWindow,
-            offset: -(initialWindow / 2)
-        )
-        if !around.isEmpty {
-            return around
-        }
-
-        guard let exactMessage = await fetchExactMessage(messageId: aroundMessageId) else {
-            return []
-        }
-
+    private func fetchWindow(around exactMessage: Message) async -> [Message] {
         let halfWindow = max(initialWindow / 2, 1)
         let older = await fetchHistory(
             fromMessageId: exactMessage.id,
@@ -263,11 +276,74 @@ final class ChannelViewModel {
             offset: -(halfWindow - 1)
         )
 
-        let combined = uniqueMessages(older + newer)
+        let combined = uniqueMessages(older + [exactMessage] + newer)
         return combined.isEmpty ? [exactMessage] : combined
     }
 
-    private func makeItem(from message: Message) -> FeedItem {
+    private func fetchExpandedWindow(around exactMessage: Message, windowSize: Int) async -> [Message] {
+        let halfWindow = max(windowSize / 2, 1)
+        let older = await fetchHistory(
+            fromMessageId: exactMessage.id,
+            limit: halfWindow + 1
+        )
+        let newer = await fetchHistory(
+            fromMessageId: exactMessage.id,
+            limit: halfWindow,
+            offset: -(halfWindow - 1)
+        )
+
+        return uniqueMessages(older + [exactMessage] + newer)
+    }
+
+    private func ensureTargetLoaded(messageId: Int64) async -> FeedItemID? {
+        if let resolved = resolvedItemID(for: messageId) {
+            return resolved
+        }
+
+        guard let exactMessage = await fetchExactMessage(messageId: messageId) else {
+            return nil
+        }
+
+        if let exactItem = makeItem(from: exactMessage) {
+            insertItemsMerged([exactItem])
+            oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+        }
+
+        if let resolved = resolvedItemID(for: messageId) {
+            return resolved
+        }
+
+        var windowSize = initialWindow * 2
+        while windowSize <= 400, !Task.isCancelled {
+            let surrounding = await fetchExpandedWindow(around: exactMessage, windowSize: windowSize)
+            let existingMessageIDs = representedMessageIDs(in: items)
+            let additions = makeItems(
+                from: surrounding.filter {
+                    !existingMessageIDs.contains(FeedItemID(chatId: channelInfo.id, messageId: $0.id))
+                }
+            )
+
+            if !additions.isEmpty {
+                insertItemsMerged(additions)
+                oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+            }
+
+            if let resolved = resolvedItemID(for: messageId) {
+                return resolved
+            }
+
+            if surrounding.count < windowSize {
+                break
+            }
+
+            windowSize *= 2
+        }
+
+        return resolvedItemID(for: messageId)
+    }
+
+    private func makeItem(from message: Message) -> FeedItem? {
+        guard message.content.shouldAppearInFeed else { return nil }
         let mediaInfo = message.content.extractMediaInfo()
 
         return FeedItem(
@@ -285,7 +361,7 @@ final class ChannelViewModel {
     }
 
     private func makeItems(from messages: [Message]) -> [FeedItem] {
-        normalizeItems(messages.map { makeItem(from: $0) })
+        normalizeItems(messages.compactMap { makeItem(from: $0) })
     }
 
     private func insertItemsMerged(_ newItems: [FeedItem]) {
@@ -397,6 +473,10 @@ final class ChannelViewModel {
                 }
             }
         )
+    }
+
+    private func resolvedItemID(for messageId: Int64) -> FeedItemID? {
+        items.first(where: { $0.matches(FeedItemID(chatId: channelInfo.id, messageId: messageId)) })?.id
     }
 
     private func performStableMutation(_ updates: () -> Void) {

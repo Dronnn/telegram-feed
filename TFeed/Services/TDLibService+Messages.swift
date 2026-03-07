@@ -2,6 +2,14 @@ import Foundation
 import TDLibKit
 
 extension TDLibService {
+    func getMessage(chatId: Int64, messageId: Int64) async throws -> Message {
+        guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
+        return try await client.getMessage(
+            chatId: chatId,
+            messageId: messageId
+        )
+    }
+
     func getChatHistory(
         chatId: Int64,
         fromMessageId: Int64 = 0,
