@@ -72,3 +72,10 @@ Date: 2026-03-07
 - kept the hop back into `TDLibService` explicit through `Task { await ... }`, which matches the queue contract documented by `TDLibKit`
 - changed `UpdateRouter` delivery to snapshot continuations first, yield outside the internal lock, and prune terminated subscribers afterward
 - re-verified the app with both the normal simulator build and `SWIFT_STRICT_CONCURRENCY=complete`
+
+### Feed UX history-window hardening
+
+- made upward pagination strictly gesture-gated: older history can load only while the user is actively dragging upward, and the gesture arms only one fetch before it must be repeated
+- introduced a separate current-day floor for the unified feed and recalculate the visible lower bound after trims, removals, and channel changes, which prevents old dates from reappearing in the today-only window on their own
+- kept edited or re-fetched messages inside the unified chronology if that message was already represented in the visible/deferred history window
+- re-verified the feed behavior with another full static audit focused on chronology, upward pagination gates, and day-boundary preservation

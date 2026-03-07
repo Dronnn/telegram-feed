@@ -244,6 +244,7 @@ struct FeedView: View {
                 }
                 .onEnded { _ in
                     isUserDraggingFeed = false
+                    canLoadOlderFromUserScroll = false
                     completeBottomRefreshIfNeeded()
                 }
         )
@@ -252,6 +253,8 @@ struct FeedView: View {
             if newPhase.isScrolling {
                 loadOlderTask?.cancel()
                 loadOlderTask = nil
+            } else {
+                canLoadOlderFromUserScroll = false
             }
         }
         .onScrollGeometryChange(
@@ -300,6 +303,8 @@ struct FeedView: View {
                 guard isUserDraggingFeed else { return }
                 if newValue < oldValue - 8 {
                     canLoadOlderFromUserScroll = true
+                } else if newValue > oldValue + 8 {
+                    canLoadOlderFromUserScroll = false
                 }
             }
         )
@@ -408,12 +413,14 @@ struct FeedView: View {
     private func requestLoadOlderIfNeeded(at topAnchor: FeedItemID?) {
         guard !isApplyingChannelChanges,
               !isRefreshing,
+              isUserDraggingFeed,
               canLoadOlderFromUserScroll,
               let topAnchor,
               loadOlderTask == nil else {
             return
         }
 
+        canLoadOlderFromUserScroll = false
         loadOlderTask?.cancel()
         loadOlderTask = Task { @MainActor in
             _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)

@@ -24,6 +24,7 @@ final class FeedViewModel {
     private var bufferedIncomingMessages: [Message] = []
     private var deferredOlderItems: [FeedItem] = []
     private var earliestVisibleDate: Int?
+    private var currentDayFloor: Int?
     private var pendingMetadataRefreshChatIDs: Set<Int64> = []
 
     private let initialLoadLimit = 30
@@ -49,6 +50,7 @@ final class FeedViewModel {
 
         do {
             let dayStart = Self.startOfCurrentDayTimestamp()
+            currentDayFloor = dayStart
             earliestVisibleDate = dayStart
             activeChannelIDs = selectedIDs
             channels = try await loadChannels()
@@ -63,6 +65,8 @@ final class FeedViewModel {
                 performStableMutation {
                     items = []
                 }
+                currentDayFloor = nil
+                earliestVisibleDate = nil
                 unreadCount = 0
                 isAtBottom = true
                 bufferedIncomingMessages.removeAll()
@@ -149,24 +153,33 @@ final class FeedViewModel {
         let perChannelLimit = max(Int(ceil(Double(batchSize) / Double(numChannels))), 1)
 
         var olderMessagesByChannel: [Int64: [Message]] = [:]
+        var channelsReachingHistoryEnd: Set<Int64> = []
 
-        await withTaskGroup(of: (Int64, [Message]).self) { group in
+        await withTaskGroup(of: (Int64, [Message], Bool).self) { group in
             for chatId in activeIDs {
                 guard let fromMessageId = channelOldestMessageIDs[chatId], fromMessageId != 0 else { continue }
                 group.addTask {
-                    guard !Task.isCancelled else { return (chatId, []) }
-                    let messages = await self.fetchMessages(
+                    guard !Task.isCancelled else { return (chatId, [], false) }
+                    let rawBatch = await self.fetchHistoryBatch(
                         chatId: chatId,
                         fromMessageId: fromMessageId,
-                        limit: perChannelLimit
+                        limit: perChannelLimit + self.historyFetchPadding
                     )
-                    guard !Task.isCancelled else { return (chatId, []) }
-                    return (chatId, messages)
+                    let messages = await self.expandAlbumEdges(chatId: chatId, messages: rawBatch)
+                    guard !Task.isCancelled else { return (chatId, [], false) }
+                    return (
+                        chatId,
+                        messages,
+                        rawBatch.count < perChannelLimit + self.historyFetchPadding
+                    )
                 }
             }
 
-            for await (chatId, messages) in group {
+            for await (chatId, messages, reachedHistoryEnd) in group {
                 olderMessagesByChannel[chatId] = messages
+                if reachedHistoryEnd {
+                    channelsReachingHistoryEnd.insert(chatId)
+                }
             }
         }
 
@@ -182,8 +195,10 @@ final class FeedViewModel {
                 channelOldestMessageIDs[chatId] = min(previous, oldest)
             }
 
-            if messages.isEmpty || messages.count <= 1 {
-                channelsWithFullHistoryLoaded.insert(chatId)
+            if messages.isEmpty {
+                if channelsReachingHistoryEnd.contains(chatId) {
+                    channelsWithFullHistoryLoaded.insert(chatId)
+                }
                 continue
             }
 
@@ -205,6 +220,10 @@ final class FeedViewModel {
             } else {
                 additions.append(contentsOf: unique)
             }
+
+            if channelsReachingHistoryEnd.contains(chatId) {
+                channelsWithFullHistoryLoaded.insert(chatId)
+            }
         }
 
         let sortedAdditions = additions.sorted()
@@ -219,6 +238,7 @@ final class FeedViewModel {
         }
 
         if !visibleAdditions.isEmpty {
+            extendVisibleHistoryLowerBound(with: visibleAdditions)
             insertItemsMerged(visibleAdditions)
             return true
         }
@@ -268,6 +288,7 @@ final class FeedViewModel {
 
             let activeIDs = selectedIDs.intersection(Set(channels.keys))
             let dayStart = Self.startOfCurrentDayTimestamp()
+            currentDayFloor = dayStart
             earliestVisibleDate = dayStart
             activeChannelIDs = activeIDs
             channelOldestMessageIDs = [:]
@@ -279,6 +300,8 @@ final class FeedViewModel {
                 performStableMutation {
                     items = []
                 }
+                currentDayFloor = nil
+                earliestVisibleDate = nil
                 unreadCount = 0
                 isAtBottom = true
                 bufferedIncomingMessages.removeAll()
@@ -362,6 +385,7 @@ final class FeedViewModel {
                 channelOldestMessageIDs.removeValue(forKey: chatId)
                 channelsWithFullHistoryLoaded.remove(chatId)
             }
+            recalculateVisibleHistoryLowerBound()
         }
 
         if !addedIDs.isEmpty {
@@ -922,6 +946,7 @@ final class FeedViewModel {
 
     private func applyIncomingMessage(_ message: Message, allowBuffering: Bool = true) {
         guard activeChannelIDs.contains(message.chatId) else { return }
+        guard shouldDisplayInCurrentHistoryWindow(message) else { return }
 
         if allowBuffering && (isLoading || channels[message.chatId] == nil) {
             guard !bufferedIncomingMessages.contains(where: { $0.id == message.id }) else { return }
@@ -952,12 +977,18 @@ final class FeedViewModel {
     private func reconcileMessage(chatId: Int64, messageId: Int64) async {
         guard activeChannelIDs.contains(chatId) else { return }
 
+        let wasAlreadyInFeedWindow = containsRepresentedMessage(chatId: chatId, messageId: messageId)
         removeMessages(chatId: chatId, messageIds: [messageId])
 
         guard let message = try? await TDLibService.shared.getMessage(
             chatId: chatId,
             messageId: messageId
         ) else {
+            rebuildHistoryCursors(for: Set([chatId]))
+            return
+        }
+
+        guard shouldDisplayInCurrentHistoryWindow(message) || wasAlreadyInFeedWindow else {
             rebuildHistoryCursors(for: Set([chatId]))
             return
         }
@@ -1000,6 +1031,7 @@ final class FeedViewModel {
             items = prune(items, for: chatId, removing: messageIds)
             deferredOlderItems = prune(deferredOlderItems, for: chatId, removing: messageIds)
         }
+        recalculateVisibleHistoryLowerBound()
         bufferedIncomingMessages.removeAll {
             $0.chatId == chatId && messageIds.contains($0.id)
         }
@@ -1226,6 +1258,7 @@ final class FeedViewModel {
         let itemsToInsert = Array(eligibleItems.suffix(limit))
         let idsToInsert = Set(itemsToInsert.map(\.id))
         deferredOlderItems.removeAll { idsToInsert.contains($0.id) }
+        extendVisibleHistoryLowerBound(with: itemsToInsert)
         insertItemsMerged(itemsToInsert)
         return true
     }
@@ -1272,6 +1305,7 @@ final class FeedViewModel {
 
             channelsWithFullHistoryLoaded.remove(chatId)
         }
+        recalculateVisibleHistoryLowerBound()
     }
 
     private func normalizeItems(_ items: [FeedItem]) -> [FeedItem] {
@@ -1342,7 +1376,11 @@ final class FeedViewModel {
         }
 
         if !additions.isEmpty {
-            insertItemsMerged(additions)
+            insertItemsMerged(
+                additions.filter { item in
+                    earliestVisibleDate.map { item.date >= $0 } ?? true
+                }
+            )
         }
     }
 
@@ -1465,6 +1503,40 @@ final class FeedViewModel {
                     }
                 }
         )
+    }
+
+    private func extendVisibleHistoryLowerBound(with items: [FeedItem]) {
+        guard let minDate = items.map(\.date).min() else { return }
+        if let earliestVisibleDate {
+            self.earliestVisibleDate = min(earliestVisibleDate, minDate)
+        } else {
+            earliestVisibleDate = minDate
+        }
+    }
+
+    private func recalculateVisibleHistoryLowerBound() {
+        let minimumLoadedDate = (items + deferredOlderItems).map(\.date).min()
+
+        if let currentDayFloor {
+            if let minimumLoadedDate {
+                earliestVisibleDate = min(currentDayFloor, minimumLoadedDate)
+            } else {
+                earliestVisibleDate = currentDayFloor
+            }
+        } else {
+            earliestVisibleDate = minimumLoadedDate
+        }
+    }
+
+    private func shouldDisplayInCurrentHistoryWindow(_ message: Message) -> Bool {
+        guard message.content.shouldAppearInFeed else { return false }
+        guard let earliestVisibleDate else { return true }
+        return message.date >= earliestVisibleDate
+    }
+
+    private func containsRepresentedMessage(chatId: Int64, messageId: Int64) -> Bool {
+        representedMessageIDs(in: items + deferredOlderItems, chatId: chatId)
+            .contains(FeedItemID(chatId: chatId, messageId: messageId))
     }
 }
 
