@@ -65,3 +65,10 @@ Date: 2026-03-07
 - preserved older-history participation for selected channels that have no visible posts today, so they still join the unified chronology once the user scrolls upward into previous periods
 - rebuilt grouped media cards after live Telegram edits/deletions instead of dropping the whole album card until the next reload
 - hardened file downloads with synchronous TDLib completion plus timeout/cancel fallback, and made late title/photo updates self-heal through `getChat` when local channel metadata is still cold
+
+### TDLib runtime hardening
+
+- moved TDLib update callback creation behind a nonisolated boundary so the library's serial update queue no longer directly enters actor-isolated `TDLibService` code
+- kept the hop back into `TDLibService` explicit through `Task { await ... }`, which matches the queue contract documented by `TDLibKit`
+- changed `UpdateRouter` delivery to snapshot continuations first, yield outside the internal lock, and prune terminated subscribers afterward
+- re-verified the app with both the normal simulator build and `SWIFT_STRICT_CONCURRENCY=complete`

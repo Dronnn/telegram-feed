@@ -26,6 +26,8 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 - **Live album recovery** — grouped media posts are rebuilt after Telegram edits or deletions so feed cards and channel details stay aligned
 - **Stable viewport** — ordinary scrolling, upward pagination, and manual rebuilds do not intentionally snap the visible message to a different place
 - **Live TDLib state sync** — feed and channel screens react to new messages, edits, deletions, channel metadata updates, and read-state updates
+- **TDLib callback hardening** — incoming TDLib updates enter the app through a nonisolated callback boundary and then hop back into `TDLibService`, which avoids actor-executor violations on TDLibKit's serial update queue
+- **Safe update fan-out** — `UpdateRouter` distributes `AsyncStream` updates without yielding while holding its internal lock, so terminating subscribers don't reenter the router in the middle of delivery
 - **Full local reset** — `Clear Local Cache` destroys local TDLib data and selected channels on the device, then returns the app to the login state
 - **Full channel discovery** — chat loading walks the whole TDLib main list instead of stopping at the first 100 chats
 - **Self-healing channel metadata** — title/photo updates recover through `getChat` when TDLib sends metadata before the local cache is warm
@@ -82,7 +84,8 @@ The app follows **MVVM** with a service layer:
 
 - **TDLibService** — an actor wrapping TDLib. Handles all Telegram API calls and manages the TDLib client lifecycle.
 - **TDLibService** also owns the single `TDLibClientManager`, recreates the client after `authorizationStateClosed`, and keeps a lightweight channel cache updated from TDLib updates.
-- **UpdateRouter** — distributes incoming TDLib updates via `AsyncStream` to the rest of the app.
+- **TDLibService** receives TDLibKit updates on the library's serial client queue, decodes them at a nonisolated boundary, and then forwards them back into the actor explicitly.
+- **UpdateRouter** — distributes incoming TDLib updates via `AsyncStream` to the rest of the app, without yielding under lock.
 - **AppState** — a global `@Observable` object tracking authentication status and shared state.
 - **ViewModels** — each screen has a dedicated `@Observable` view model that consumes updates from the router and exposes UI-ready state.
 - **Views** — pure SwiftUI views driven entirely by their view models.

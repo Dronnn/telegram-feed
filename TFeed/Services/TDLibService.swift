@@ -42,18 +42,10 @@ actor TDLibService {
         }
         guard client == nil, let manager else { return }
 
-        let router = updateRouter
-        let client = manager.createClient(updateHandler: { [self] data, client in
-            do {
-                let update = try client.decoder.decode(Update.self, from: data)
-                router.send(update)
-                Task {
-                    self.handle(update: update, fromClientID: client.id)
-                }
-            } catch {
-                // Decoding failures are expected for unsupported update types
-            }
-        })
+        let service = self
+        let client = manager.createClient(
+            updateHandler: Self.makeUpdateHandler(service: service)
+        )
         self.client = client
     }
 
@@ -174,6 +166,24 @@ actor TDLibService {
             title: chat.title,
             avatarFileId: chat.photo?.small.id
         )
+    }
+
+    nonisolated private static func makeUpdateHandler(service: TDLibService) -> (Data, TDLibClient) -> Void {
+        { data, client in
+            do {
+                let update = try client.decoder.decode(Update.self, from: data)
+                Task {
+                    await service.processIncomingUpdate(update, fromClientID: client.id)
+                }
+            } catch {
+                // Decoding failures are expected for unsupported update types
+            }
+        }
+    }
+
+    private func processIncomingUpdate(_ update: Update, fromClientID clientID: Int32) {
+        updateRouter.send(update)
+        handle(update: update, fromClientID: clientID)
     }
 
     private func handle(update: Update, fromClientID clientID: Int32) {
