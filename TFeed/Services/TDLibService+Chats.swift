@@ -20,6 +20,21 @@ extension TDLibService {
         return result.chatIds
     }
 
+    private func getAllChats() async throws -> [Int64] {
+        var limit = 200
+        var previousCount = -1
+
+        while true {
+            let chatIds = try await getChats(limit: limit)
+            if chatIds.count == previousCount || chatIds.count < limit {
+                return chatIds
+            }
+
+            previousCount = chatIds.count
+            limit *= 2
+        }
+    }
+
     func getChat(chatId: Int64) async throws -> Chat {
         guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
         let chat = try await client.getChat(chatId: chatId)
@@ -30,7 +45,7 @@ extension TDLibService {
     func loadAvailableChannels() async throws -> [Int64: ChannelInfo] {
         try await loadChats()
 
-        let chatIds = try await getChats()
+        let chatIds = try await getAllChats()
         for chatId in chatIds {
             _ = try await getChat(chatId: chatId)
         }

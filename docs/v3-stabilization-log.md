@@ -61,3 +61,7 @@ Date: 2026-03-07
 - switched TDLib chat discovery away from the initial `100`-chat cap by loading the full main chat list before building channel lists
 - extended TDLib update handling beyond `updateNewMessage`: feed/channel models now react to edits, deletions, read-inbox updates, and channel title/photo changes
 - tightened message filtering so unsupported TDLib message content no longer renders as empty cards
+- kept older-history loading behind an explicit upward user scroll so the feed no longer pulls in yesterday/older posts on first paint or immediately after a manual rebuild
+- preserved older-history participation for selected channels that have no visible posts today, so they still join the unified chronology once the user scrolls upward into previous periods
+- rebuilt grouped media cards after live Telegram edits/deletions instead of dropping the whole album card until the next reload
+- hardened file downloads with synchronous TDLib completion plus timeout/cancel fallback, and made late title/photo updates self-heal through `getChat` when local channel metadata is still cold

@@ -18,6 +18,7 @@ final class ChannelViewModel {
     static let upwardBufferSize = 60
     private static let upwardTrimThreshold = upwardBufferSize + 30
     private static let upwardLoadTriggerThreshold = 5
+    private let albumBoundaryFetchSize = 12
 
     private let initialWindow = 50
     private let pageSize = 30
@@ -249,7 +250,10 @@ final class ChannelViewModel {
 
         case .updateDeleteMessages(let value):
             guard value.chatId == channelInfo.id else { break }
-            removeMessages(Set(value.messageIds))
+            let removedMessageIDs = Set(value.messageIds)
+            let albumRebuildAnchors = affectedAlbumRebuildAnchors(removing: removedMessageIDs)
+            removeMessages(removedMessageIDs)
+            await restoreAffectedAlbums(survivingMessageIds: albumRebuildAnchors)
 
         case .updateChatReadInbox(let value):
             guard value.chatId == channelInfo.id else { break }
@@ -422,7 +426,8 @@ final class ChannelViewModel {
             normalizedAlbumID(for: $0) == albumID
         }
 
-        return makeItems(from: albumMessages)
+        let expandedAlbum = await expandAlbumEdges(albumMessages)
+        return makeItems(from: expandedAlbum)
     }
 
     private func removeMessages(_ messageIds: Set<Int64>) {
@@ -442,6 +447,38 @@ final class ChannelViewModel {
                 )
             }
         }
+    }
+
+    private func affectedAlbumRebuildAnchors(removing messageIds: Set<Int64>) -> [Int64] {
+        guard !messageIds.isEmpty else { return [] }
+
+        return Array(
+            Set(
+                items.compactMap { item in
+                    guard item.mediaAlbumId != nil,
+                          item.representedMessageIds.contains(where: { messageIds.contains($0) }) else {
+                        return nil
+                    }
+
+                    return item.representedMessageIds
+                        .filter { !messageIds.contains($0) }
+                        .max()
+                }
+            )
+        )
+    }
+
+    private func restoreAffectedAlbums(survivingMessageIds: [Int64]) async {
+        guard !survivingMessageIds.isEmpty else { return }
+
+        for messageId in survivingMessageIds.sorted() {
+            guard let message = await fetchExactMessage(messageId: messageId) else { continue }
+            let replacements = await replacementItems(for: message)
+            guard !replacements.isEmpty else { continue }
+            insertItemsMerged(replacements)
+        }
+
+        oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
     }
 
     private func makeItem(from message: Message) -> FeedItem? {
@@ -551,6 +588,96 @@ final class ChannelViewModel {
         return messages.filter { seen.insert($0.id).inserted }
     }
 
+    private func expandAlbumEdges(_ messages: [Message]) async -> [Message] {
+        let unique = uniqueMessages(messages)
+        guard !unique.isEmpty else { return [] }
+
+        let sorted = unique.sorted { $0.id < $1.id }
+        var expanded = unique
+
+        if let oldest = sorted.first {
+            expanded.append(contentsOf: await fetchAlbumBoundarySiblings(
+                boundary: oldest,
+                direction: .older
+            ))
+        }
+
+        if let newest = sorted.last {
+            expanded.append(contentsOf: await fetchAlbumBoundarySiblings(
+                boundary: newest,
+                direction: .newer
+            ))
+        }
+
+        return uniqueMessages(expanded)
+    }
+
+    private func fetchAlbumBoundarySiblings(
+        boundary: Message,
+        direction: AlbumBoundaryDirection
+    ) async -> [Message] {
+        guard let albumID = normalizedAlbumID(for: boundary) else { return [] }
+
+        var cursor = boundary.id
+        var collected: [Message] = []
+
+        while !Task.isCancelled {
+            let batch: [Message]
+            switch direction {
+            case .older:
+                batch = await fetchHistory(
+                    fromMessageId: cursor,
+                    limit: albumBoundaryFetchSize
+                )
+            case .newer:
+                batch = await fetchHistory(
+                    fromMessageId: cursor,
+                    limit: albumBoundaryFetchSize,
+                    offset: -(albumBoundaryFetchSize - 1)
+                )
+            }
+
+            guard !batch.isEmpty else { break }
+
+            let candidates = batch
+                .filter {
+                    switch direction {
+                    case .older:
+                        return $0.id < cursor
+                    case .newer:
+                        return $0.id > cursor
+                    }
+                }
+                .sorted { lhs, rhs in
+                    switch direction {
+                    case .older:
+                        return lhs.id > rhs.id
+                    case .newer:
+                        return lhs.id < rhs.id
+                    }
+                }
+
+            guard !candidates.isEmpty else { break }
+
+            var advanced = false
+            for message in candidates {
+                if normalizedAlbumID(for: message) == albumID {
+                    collected.append(message)
+                    cursor = message.id
+                    advanced = true
+                } else {
+                    return collected
+                }
+            }
+
+            if !advanced || candidates.count < albumBoundaryFetchSize - 1 {
+                break
+            }
+        }
+
+        return collected
+    }
+
     private func canMergeAlbum(_ lhs: FeedItem, _ rhs: FeedItem) -> Bool {
         guard let lhsAlbumID = lhs.mediaAlbumId,
               let rhsAlbumID = rhs.mediaAlbumId else {
@@ -627,4 +754,9 @@ final class ChannelViewModel {
         withTransaction(transaction, updates)
     }
 
+}
+
+private enum AlbumBoundaryDirection {
+    case older
+    case newer
 }

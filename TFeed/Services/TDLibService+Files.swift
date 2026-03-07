@@ -4,7 +4,6 @@ import TDLibKit
 extension TDLibService {
     func downloadFile(id: Int, priority: Int = 5) async throws -> File {
         guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
-        let stream = updateRouter.updates()
 
         if let existing = try? await getFile(id: id),
            existing.local.isDownloadingCompleted,
@@ -12,29 +11,44 @@ extension TDLibService {
             return existing
         }
 
-        _ = try await client.downloadFile(
-            fileId: id,
-            limit: 0,
-            offset: 0,
-            priority: priority,
-            synchronous: false
-        )
+        do {
+            return try await withThrowingTaskGroup(of: File.self) { group in
+                group.addTask {
+                    try await client.downloadFile(
+                        fileId: id,
+                        limit: 0,
+                        offset: 0,
+                        priority: priority,
+                        synchronous: true
+                    )
+                }
 
-        if let started = try? await getFile(id: id),
-           started.local.isDownloadingCompleted,
-           !started.local.path.isEmpty {
-            return started
-        }
+                group.addTask {
+                    try await Task.sleep(for: .seconds(30))
+                    throw TDLibServiceError.fileDownloadTimedOut
+                }
 
-        for await update in stream {
-            guard !Task.isCancelled else { throw CancellationError() }
-            guard case .updateFile(let value) = update, value.file.id == id else { continue }
-            if value.file.local.isDownloadingCompleted, !value.file.local.path.isEmpty {
-                return value.file
+                guard let file = try await group.next() else {
+                    throw TDLibServiceError.fileDownloadFailed
+                }
+                group.cancelAll()
+
+                if file.local.isDownloadingCompleted, !file.local.path.isEmpty {
+                    return file
+                }
+
+                if let refreshed = try? await getFile(id: id),
+                   refreshed.local.isDownloadingCompleted,
+                   !refreshed.local.path.isEmpty {
+                    return refreshed
+                }
+
+                throw TDLibServiceError.fileDownloadFailed
             }
+        } catch {
+            _ = try? await client.cancelDownloadFile(fileId: id, onlyIfPending: false)
+            throw error
         }
-
-        throw CancellationError()
     }
 
     func getFile(id: Int) async throws -> File {

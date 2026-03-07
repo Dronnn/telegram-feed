@@ -24,6 +24,8 @@ struct FeedView: View {
     @State private var scrollPosition = ScrollPosition()
     @State private var bottomRefreshArmed = false
     @State private var bottomPullDistance: CGFloat = 0
+    @State private var isUserDraggingFeed = false
+    @State private var canLoadOlderFromUserScroll = false
 
     private let bottomRefreshThreshold: CGFloat = 60
 
@@ -60,6 +62,8 @@ struct FeedView: View {
             readingAnchorID = nil
             lastVisiblePosition = nil
             isContentReady = false
+            canLoadOlderFromUserScroll = false
+            isUserDraggingFeed = false
             await viewModel.load(selectedIDs: appState.selectedChannelIDs)
             setupScrollPosition()
             isContentReady = true
@@ -235,7 +239,11 @@ struct FeedView: View {
         }
         .simultaneousGesture(
             DragGesture(minimumDistance: 1)
+                .onChanged { _ in
+                    isUserDraggingFeed = true
+                }
                 .onEnded { _ in
+                    isUserDraggingFeed = false
                     completeBottomRefreshIfNeeded()
                 }
         )
@@ -282,6 +290,16 @@ struct FeedView: View {
                 bottomPullDistance = newValue
                 if newValue <= 0 {
                     bottomRefreshArmed = false
+                }
+            }
+        )
+        .onScrollGeometryChange(
+            for: CGFloat.self,
+            of: { geometry in geometry.contentOffset.y },
+            action: { oldValue, newValue in
+                guard isUserDraggingFeed else { return }
+                if newValue < oldValue - 8 {
+                    canLoadOlderFromUserScroll = true
                 }
             }
         )
@@ -390,6 +408,7 @@ struct FeedView: View {
     private func requestLoadOlderIfNeeded(at topAnchor: FeedItemID?) {
         guard !isApplyingChannelChanges,
               !isRefreshing,
+              canLoadOlderFromUserScroll,
               let topAnchor,
               loadOlderTask == nil else {
             return
@@ -409,6 +428,8 @@ struct FeedView: View {
         isRefreshing = true
         bottomPullDistance = 0
         bottomRefreshArmed = false
+        canLoadOlderFromUserScroll = false
+        isUserDraggingFeed = false
         let previousItems = viewModel.items
         let previousTarget = currentTopAnchorTarget() ?? currentAnchorTarget()
 

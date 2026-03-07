@@ -23,6 +23,8 @@ actor TDLibService {
     enum TDLibServiceError: Swift.Error {
         case clientNotInitialized
         case documentDirectoryUnavailable
+        case fileDownloadTimedOut
+        case fileDownloadFailed
     }
 
     static let shared = TDLibService()
@@ -188,20 +190,32 @@ actor TDLibService {
             cacheChannelInfo(from: value.chat)
 
         case .updateChatTitle(let value):
-            guard let existing = knownChannels[value.chatId] else { break }
-            knownChannels[value.chatId] = ChannelInfo(
-                id: existing.id,
-                title: value.title,
-                avatarFileId: existing.avatarFileId
-            )
+            if let existing = knownChannels[value.chatId] {
+                knownChannels[value.chatId] = ChannelInfo(
+                    id: existing.id,
+                    title: value.title,
+                    avatarFileId: existing.avatarFileId
+                )
+            } else {
+                Task { [weak self] in
+                    guard let self else { return }
+                    _ = try? await self.getChat(chatId: value.chatId)
+                }
+            }
 
         case .updateChatPhoto(let value):
-            let currentTitle = knownChannels[value.chatId]?.title ?? ""
-            knownChannels[value.chatId] = ChannelInfo(
-                id: value.chatId,
-                title: currentTitle,
-                avatarFileId: value.photo?.small.id
-            )
+            if let existing = knownChannels[value.chatId] {
+                knownChannels[value.chatId] = ChannelInfo(
+                    id: value.chatId,
+                    title: existing.title,
+                    avatarFileId: value.photo?.small.id
+                )
+            } else {
+                Task { [weak self] in
+                    guard let self else { return }
+                    _ = try? await self.getChat(chatId: value.chatId)
+                }
+            }
 
         default:
             break
