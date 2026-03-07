@@ -78,4 +78,6 @@ Date: 2026-03-07
 - made upward pagination strictly gesture-gated: older history can load only while the user is actively dragging upward, and the gesture arms only one fetch before it must be repeated
 - introduced a separate current-day floor for the unified feed and recalculate the visible lower bound after trims, removals, and channel changes, which prevents old dates from reappearing in the today-only window on their own
 - kept edited or re-fetched messages inside the unified chronology if that message was already represented in the visible/deferred history window
+- tightened the upward trigger from `<= 10` hidden items to `< 10`, so the feed does not immediately chain another history fetch right after restoring the preview buffer
+- removed the last programmatic `.top` restore from main-feed upward pagination and made the one-fetch-per-drag gate depend on a real successful older-history load
 - re-verified the feed behavior with another full static audit focused on chronology, upward pagination gates, and day-boundary preservation

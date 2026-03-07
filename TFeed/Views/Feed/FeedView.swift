@@ -26,6 +26,7 @@ struct FeedView: View {
     @State private var bottomPullDistance: CGFloat = 0
     @State private var isUserDraggingFeed = false
     @State private var canLoadOlderFromUserScroll = false
+    @State private var hasLoadedOlderInCurrentDrag = false
 
     private let bottomRefreshThreshold: CGFloat = 60
 
@@ -64,6 +65,7 @@ struct FeedView: View {
             isContentReady = false
             canLoadOlderFromUserScroll = false
             isUserDraggingFeed = false
+            hasLoadedOlderInCurrentDrag = false
             await viewModel.load(selectedIDs: appState.selectedChannelIDs)
             setupScrollPosition()
             isContentReady = true
@@ -240,11 +242,15 @@ struct FeedView: View {
         .simultaneousGesture(
             DragGesture(minimumDistance: 1)
                 .onChanged { _ in
+                    if !isUserDraggingFeed {
+                        hasLoadedOlderInCurrentDrag = false
+                    }
                     isUserDraggingFeed = true
                 }
                 .onEnded { _ in
                     isUserDraggingFeed = false
                     canLoadOlderFromUserScroll = false
+                    hasLoadedOlderInCurrentDrag = false
                     completeBottomRefreshIfNeeded()
                 }
         )
@@ -255,6 +261,9 @@ struct FeedView: View {
                 loadOlderTask = nil
             } else {
                 canLoadOlderFromUserScroll = false
+                if !isUserDraggingFeed {
+                    hasLoadedOlderInCurrentDrag = false
+                }
             }
         }
         .onScrollGeometryChange(
@@ -300,7 +309,7 @@ struct FeedView: View {
             for: CGFloat.self,
             of: { geometry in geometry.contentOffset.y },
             action: { oldValue, newValue in
-                guard isUserDraggingFeed else { return }
+                guard isUserDraggingFeed, !hasLoadedOlderInCurrentDrag else { return }
                 if newValue < oldValue - 8 {
                     canLoadOlderFromUserScroll = true
                 } else if newValue > oldValue + 8 {
@@ -423,8 +432,13 @@ struct FeedView: View {
         canLoadOlderFromUserScroll = false
         loadOlderTask?.cancel()
         loadOlderTask = Task { @MainActor in
-            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
-            guard !Task.isCancelled else { return }
+            let didLoadOlder = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+            guard !Task.isCancelled else {
+                loadOlderTask = nil
+                return
+            }
+
+            hasLoadedOlderInCurrentDrag = didLoadOlder
 
             loadOlderTask = nil
         }
@@ -436,6 +450,7 @@ struct FeedView: View {
         bottomPullDistance = 0
         bottomRefreshArmed = false
         canLoadOlderFromUserScroll = false
+        hasLoadedOlderInCurrentDrag = false
         isUserDraggingFeed = false
         let previousItems = viewModel.items
         let previousTarget = currentTopAnchorTarget() ?? currentAnchorTarget()

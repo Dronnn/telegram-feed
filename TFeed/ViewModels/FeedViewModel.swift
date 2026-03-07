@@ -128,7 +128,7 @@ final class FeedViewModel {
             return false
         }
 
-        guard itemsAbove <= Self.upwardLoadTriggerThreshold else {
+        guard itemsAbove < Self.upwardLoadTriggerThreshold else {
             return false
         }
 
