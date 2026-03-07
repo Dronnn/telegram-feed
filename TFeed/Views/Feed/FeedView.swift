@@ -27,8 +27,10 @@ struct FeedView: View {
     @State private var isUserDraggingFeed = false
     @State private var canLoadOlderFromUserScroll = false
     @State private var hasLoadedOlderInCurrentDrag = false
+    @State private var isNearTopLoadBuffer = false
 
     private let bottomRefreshThreshold: CGFloat = 60
+    private let topLoadBufferThreshold: CGFloat = 72
 
     var body: some View {
         NavigationStack {
@@ -66,6 +68,7 @@ struct FeedView: View {
             canLoadOlderFromUserScroll = false
             isUserDraggingFeed = false
             hasLoadedOlderInCurrentDrag = false
+            isNearTopLoadBuffer = false
             await viewModel.load(selectedIDs: appState.selectedChannelIDs)
             setupScrollPosition()
             isContentReady = true
@@ -249,6 +252,8 @@ struct FeedView: View {
                 }
                 .onEnded { _ in
                     isUserDraggingFeed = false
+                    loadOlderTask?.cancel()
+                    loadOlderTask = nil
                     canLoadOlderFromUserScroll = false
                     hasLoadedOlderInCurrentDrag = false
                     completeBottomRefreshIfNeeded()
@@ -260,6 +265,10 @@ struct FeedView: View {
                 loadOlderTask?.cancel()
                 loadOlderTask = nil
             } else {
+                if !isUserDraggingFeed {
+                    loadOlderTask?.cancel()
+                    loadOlderTask = nil
+                }
                 canLoadOlderFromUserScroll = false
                 if !isUserDraggingFeed {
                     hasLoadedOlderInCurrentDrag = false
@@ -303,6 +312,16 @@ struct FeedView: View {
                 if newValue <= 0 {
                     bottomRefreshArmed = false
                 }
+            }
+        )
+        .onScrollGeometryChange(
+            for: Bool.self,
+            of: { geometry in
+                let visibleTop = geometry.contentOffset.y + geometry.contentInsets.top
+                return visibleTop <= topLoadBufferThreshold
+            },
+            action: { _, newValue in
+                isNearTopLoadBuffer = newValue
             }
         )
         .onScrollGeometryChange(
@@ -424,6 +443,7 @@ struct FeedView: View {
               !isRefreshing,
               isUserDraggingFeed,
               canLoadOlderFromUserScroll,
+              isNearTopLoadBuffer,
               let topAnchor,
               loadOlderTask == nil else {
             return
@@ -438,13 +458,16 @@ struct FeedView: View {
                 return
             }
 
-            if didLoadOlder {
-                await Task.yield()
+            guard isUserDraggingFeed else {
+                hasLoadedOlderInCurrentDrag = false
+                loadOlderTask = nil
+                return
+            }
 
+            if didLoadOlder {
                 if let restoredTop = resolvedItemID(for: topAnchor) {
                     viewportAnchorID = restoredTop
                     lastVisiblePosition = restoredTop
-                    scrollPosition.scrollTo(id: restoredTop, anchor: .top)
                 }
             }
 

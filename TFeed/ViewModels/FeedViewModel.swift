@@ -224,15 +224,13 @@ final class FeedViewModel {
 
         let deferredCandidates = drainDeferredOlderItems(before: anchorItem)
         let sortedAdditions = normalizeItems(additions + deferredCandidates).sorted()
-        let visibleAdditions: [FeedItem]
-        if sortedAdditions.count > Self.upwardLoadBatchSize {
-            let deferredBatch = Array(sortedAdditions.dropLast(Self.upwardLoadBatchSize))
-            bufferDeferredOlderItems(deferredBatch)
+        let olderPage = splitOlderPage(sortedAdditions, batchSize: Self.upwardLoadBatchSize)
+        if !olderPage.deferred.isEmpty {
+            bufferDeferredOlderItems(olderPage.deferred)
             bufferedDeferredItems = true
-            visibleAdditions = Array(sortedAdditions.suffix(Self.upwardLoadBatchSize))
-        } else {
-            visibleAdditions = sortedAdditions
         }
+
+        let visibleAdditions = olderPage.visible
 
         if !visibleAdditions.isEmpty {
             extendVisibleHistoryLowerBound(with: visibleAdditions)
@@ -429,7 +427,17 @@ final class FeedViewModel {
                 insertItemsMerged(added)
             }
             if items.isEmpty && added.isEmpty {
-                insertItemsMerged(hiddenOlderPreviewItems)
+                let olderPage = splitOlderPage(
+                    normalizeItems(hiddenOlderPreviewItems).sorted(),
+                    batchSize: Self.upwardLoadBatchSize
+                )
+                if !olderPage.visible.isEmpty {
+                    extendVisibleHistoryLowerBound(with: olderPage.visible)
+                    insertItemsMerged(olderPage.visible)
+                }
+                if !olderPage.deferred.isEmpty {
+                    bufferDeferredOlderItems(olderPage.deferred)
+                }
             } else {
                 bufferDeferredOlderItems(hiddenOlderPreviewItems)
             }
@@ -914,8 +922,18 @@ final class FeedViewModel {
 
         guard !collected.isEmpty else { return }
 
-        performStableMutation {
-            items = normalizeItems(items + collected)
+        let olderPage = splitOlderPage(
+            normalizeItems(collected).sorted(),
+            batchSize: Self.upwardLoadBatchSize
+        )
+        if !olderPage.visible.isEmpty {
+            extendVisibleHistoryLowerBound(with: olderPage.visible)
+            performStableMutation {
+                items = normalizeItems(items + olderPage.visible)
+            }
+        }
+        if !olderPage.deferred.isEmpty {
+            bufferDeferredOlderItems(olderPage.deferred)
         }
     }
 
@@ -932,13 +950,16 @@ final class FeedViewModel {
         }
     }
 
-    private func filterMessagesToVisibleRange(_ messages: [Message]) -> [Message] {
-        guard let earliestVisibleDate else { return messages }
-        return messages.filter { $0.date >= earliestVisibleDate }
-    }
-
     private static func startOfCurrentDayTimestamp() -> Int {
         Int(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970)
+    }
+
+    private static func startOfDayTimestamp(for timestamp: Int) -> Int {
+        Int(
+            Calendar.current.startOfDay(
+                for: Date(timeIntervalSince1970: TimeInterval(timestamp))
+            ).timeIntervalSince1970
+        )
     }
 
     private func applyIncomingMessage(_ message: Message, allowBuffering: Bool = true) {
@@ -974,7 +995,9 @@ final class FeedViewModel {
     private func reconcileMessage(chatId: Int64, messageId: Int64) async {
         guard activeChannelIDs.contains(chatId) else { return }
 
-        let wasAlreadyInFeedWindow = containsRepresentedMessage(chatId: chatId, messageId: messageId)
+        let messageKey = FeedItemID(chatId: chatId, messageId: messageId)
+        let wasVisible = representedMessageIDs(in: items, chatId: chatId).contains(messageKey)
+        let wasDeferred = representedMessageIDs(in: deferredOlderItems, chatId: chatId).contains(messageKey)
         removeMessages(chatId: chatId, messageIds: [messageId])
 
         guard let message = try? await TDLibService.shared.getMessage(
@@ -985,14 +1008,19 @@ final class FeedViewModel {
             return
         }
 
-        guard shouldDisplayInCurrentHistoryWindow(message) || wasAlreadyInFeedWindow else {
+        let shouldRemainVisible = shouldDisplayInCurrentHistoryWindow(message) || wasVisible
+        guard shouldRemainVisible || wasDeferred else {
             rebuildHistoryCursors(for: Set([chatId]))
             return
         }
 
         let replacements = await replacementItems(for: message)
         if !replacements.isEmpty {
-            insertItemsMerged(replacements)
+            if shouldRemainVisible {
+                insertItemsRespectingVisibleBoundary(replacements)
+            } else {
+                bufferDeferredOlderItems(replacements)
+            }
         }
         rebuildHistoryCursors(for: Set([chatId]))
     }
@@ -1261,6 +1289,32 @@ final class FeedViewModel {
         return eligibleItems.sorted()
     }
 
+    private func splitOlderPage(_ items: [FeedItem], batchSize: Int) -> (visible: [FeedItem], deferred: [FeedItem]) {
+        guard !items.isEmpty else { return ([], []) }
+
+        let baseVisible: [FeedItem]
+        var deferred: [FeedItem] = []
+
+        if items.count > batchSize {
+            deferred.append(contentsOf: items.dropLast(batchSize))
+            baseVisible = Array(items.suffix(batchSize))
+        } else {
+            baseVisible = items
+        }
+
+        guard let newestVisibleItem = baseVisible.last else {
+            return ([], normalizeItems(deferred).sorted())
+        }
+
+        let newestVisibleDayStart = Self.startOfDayTimestamp(for: newestVisibleItem.date)
+        let visible = baseVisible.filter { Self.startOfDayTimestamp(for: $0.date) == newestVisibleDayStart }
+        deferred.append(contentsOf: baseVisible.filter {
+            Self.startOfDayTimestamp(for: $0.date) != newestVisibleDayStart
+        })
+
+        return (visible.sorted(), normalizeItems(deferred).sorted())
+    }
+
     private func preferredInitialAnchorID() -> FeedItemID? {
         if let firstUnread = items.first(where: { !isRead($0) }) {
             return firstUnread.id
@@ -1424,6 +1478,24 @@ final class FeedViewModel {
         return uniqueMessages(collected)
     }
 
+    private func insertItemsRespectingVisibleBoundary(_ newItems: [FeedItem]) {
+        guard !newItems.isEmpty else { return }
+        guard let currentOldestVisibleItem = items.first else {
+            insertItemsMerged(newItems)
+            return
+        }
+
+        let hiddenItems = newItems.filter { $0 < currentOldestVisibleItem }
+        let visibleItems = newItems.filter { !($0 < currentOldestVisibleItem) }
+
+        if !hiddenItems.isEmpty {
+            bufferDeferredOlderItems(hiddenItems)
+        }
+        if !visibleItems.isEmpty {
+            insertItemsMerged(visibleItems)
+        }
+    }
+
     private func performStableMutation(_ updates: () -> Void) {
         var transaction = Transaction(animation: nil)
         transaction.scrollPositionUpdatePreservesVelocity = true
@@ -1517,7 +1589,7 @@ final class FeedViewModel {
     }
 
     private func recalculateVisibleHistoryLowerBound() {
-        let minimumLoadedDate = (items + deferredOlderItems).map(\.date).min()
+        let minimumLoadedDate = items.map(\.date).min()
 
         if let currentDayFloor {
             if let minimumLoadedDate {
@@ -1536,10 +1608,6 @@ final class FeedViewModel {
         return message.date >= earliestVisibleDate
     }
 
-    private func containsRepresentedMessage(chatId: Int64, messageId: Int64) -> Bool {
-        representedMessageIDs(in: items + deferredOlderItems, chatId: chatId)
-            .contains(FeedItemID(chatId: chatId, messageId: messageId))
-    }
 }
 
 private enum AlbumBoundaryDirection {
