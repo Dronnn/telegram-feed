@@ -23,6 +23,7 @@ final class ChannelViewModel {
     private let pageSize = 30
     private(set) var lastScheduledReadPosition: FeedItemID?
     private var markAsReadTask: Task<Void, Never>?
+    private var listeningTask: Task<Void, Never>?
     private var oldestHistoryCursor: Int64?
 
     init(channelInfo: ChannelInfo) {
@@ -31,6 +32,9 @@ final class ChannelViewModel {
 
     func load(aroundMessageId: Int64? = nil) async -> FeedItemID? {
         guard !isLoading else { return nil }
+        if listeningTask == nil {
+            startListening()
+        }
         isLoading = true
         defer { isLoading = false }
 
@@ -208,7 +212,53 @@ final class ChannelViewModel {
         await markVisibleAsRead(currentPosition: position)
     }
 
+    func stopListening() {
+        listeningTask?.cancel()
+        listeningTask = nil
+    }
+
     // MARK: - Private
+
+    private func startListening() {
+        guard listeningTask == nil else { return }
+        listeningTask = Task {
+            let router = TDLibService.shared.updateRouter
+            for await update in router.updates() {
+                guard !Task.isCancelled else { break }
+                await handle(update: update)
+            }
+        }
+    }
+
+    private func handle(update: Update) async {
+        switch update {
+        case .updateNewMessage(let value):
+            guard value.message.chatId == channelInfo.id else { break }
+            if let item = makeItem(from: value.message) {
+                insertItemsMerged([item])
+                oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+            }
+
+        case .updateMessageContent(let value):
+            guard value.chatId == channelInfo.id else { break }
+            await reconcileMessage(messageId: value.messageId)
+
+        case .updateMessageEdited(let value):
+            guard value.chatId == channelInfo.id else { break }
+            await reconcileMessage(messageId: value.messageId)
+
+        case .updateDeleteMessages(let value):
+            guard value.chatId == channelInfo.id else { break }
+            removeMessages(Set(value.messageIds))
+
+        case .updateChatReadInbox(let value):
+            guard value.chatId == channelInfo.id else { break }
+            lastReadInboxMessageId = max(lastReadInboxMessageId, value.lastReadInboxMessageId)
+
+        default:
+            break
+        }
+    }
 
     private func markVisibleAsRead(currentPosition: FeedItemID?) async {
         guard let currentPosition,
@@ -342,6 +392,58 @@ final class ChannelViewModel {
         return resolvedItemID(for: messageId)
     }
 
+    private func reconcileMessage(messageId: Int64) async {
+        removeMessages([messageId])
+
+        guard let message = await fetchExactMessage(messageId: messageId) else {
+            oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+            return
+        }
+
+        let replacements = await replacementItems(for: message)
+        if !replacements.isEmpty {
+            insertItemsMerged(replacements)
+        }
+        oldestHistoryCursor = items.first?.representedMessageIds.min() ?? items.first?.messageId
+    }
+
+    private func replacementItems(for message: Message) async -> [FeedItem] {
+        guard let albumID = normalizedAlbumID(for: message) else {
+            return makeItems(from: [message])
+        }
+
+        let surrounding = await fetchHistory(
+            fromMessageId: message.id,
+            limit: max(pageSize, 12),
+            offset: -5
+        )
+
+        let albumMessages = uniqueMessages(surrounding + [message]).filter {
+            normalizedAlbumID(for: $0) == albumID
+        }
+
+        return makeItems(from: albumMessages)
+    }
+
+    private func removeMessages(_ messageIds: Set<Int64>) {
+        guard !messageIds.isEmpty else { return }
+
+        performStableMutation {
+            items = items.compactMap { item in
+                let remainingIds = item.representedMessageIds.filter { !messageIds.contains($0) }
+                guard remainingIds.count != item.representedMessageIds.count else { return item }
+                guard !remainingIds.isEmpty else { return nil }
+                guard item.mediaAlbumId == nil else { return nil }
+
+                return copy(
+                    item,
+                    messageId: remainingIds.max() ?? item.messageId,
+                    representedMessageIds: remainingIds
+                )
+            }
+        }
+    }
+
     private func makeItem(from message: Message) -> FeedItem? {
         guard message.content.shouldAppearInFeed else { return nil }
         let mediaInfo = message.content.extractMediaInfo()
@@ -357,6 +459,25 @@ final class ChannelViewModel {
             mediaAlbumId: normalizedAlbumID(for: message),
             representedMessageIds: [message.id],
             mediaItems: mediaInfo.map { [$0] } ?? []
+        )
+    }
+
+    private func copy(
+        _ item: FeedItem,
+        messageId: Int64? = nil,
+        representedMessageIds: [Int64]? = nil
+    ) -> FeedItem {
+        FeedItem(
+            chatId: item.chatId,
+            messageId: messageId ?? item.messageId,
+            date: item.date,
+            formattedText: item.formattedText,
+            channelTitle: item.channelTitle,
+            avatarFileId: item.avatarFileId,
+            reactions: item.reactions,
+            mediaAlbumId: item.mediaAlbumId,
+            representedMessageIds: representedMessageIds ?? item.representedMessageIds,
+            mediaItems: item.mediaItems
         )
     }
 

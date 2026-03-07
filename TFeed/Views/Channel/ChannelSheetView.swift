@@ -60,6 +60,7 @@ struct ChannelSheetView: View {
         .onDisappear {
             trimTask?.cancel()
             loadOlderTask?.cancel()
+            viewModel.stopListening()
             Task {
                 await viewModel.flushPendingReadState()
                 onReadStateChanged?(channelInfo.id, viewModel.lastReadInboxMessageId)

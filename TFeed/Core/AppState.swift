@@ -40,7 +40,7 @@ final class AppState {
                     case .authorizationStateReady:
                         self.authState = .authorized
                     case .authorizationStateClosed:
-                        self.authState = .unauthorized
+                        self.authState = .loading
                     default:
                         break
                     }

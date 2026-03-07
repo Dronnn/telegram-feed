@@ -20,7 +20,11 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 - **Bounded upward loading** — when scrolling upward, older messages are added in small chunks while preserving the current viewport and without automatic feed jumps
 - **Complete fresh tail on rebuild** — a manual daily rebuild re-fetches the latest per-channel tail so the newest post from a selected channel is not lost from the unified feed
 - **Poll filtering** — Telegram polls are skipped instead of rendering as empty cards
+- **Unsupported post filtering** — message types the app can’t render are dropped instead of showing empty cards
 - **Stable viewport** — ordinary scrolling, upward pagination, and manual rebuilds do not intentionally snap the visible message to a different place
+- **Live TDLib state sync** — feed and channel screens react to new messages, edits, deletions, channel metadata updates, and read-state updates
+- **Full local reset** — `Clear Local Cache` destroys local TDLib data and selected channels on the device, then returns the app to the login state
+- **Full channel discovery** — chat loading walks the whole TDLib main list instead of stopping at the first 100 chats
 - **Liquid Glass design** — built for iOS 26
 
 ## Requirements
@@ -73,6 +77,7 @@ A native iOS app for reading Telegram channels as a unified feed. Log in with yo
 The app follows **MVVM** with a service layer:
 
 - **TDLibService** — an actor wrapping TDLib. Handles all Telegram API calls and manages the TDLib client lifecycle.
+- **TDLibService** also owns the single `TDLibClientManager`, recreates the client after `authorizationStateClosed`, and keeps a lightweight channel cache updated from TDLib updates.
 - **UpdateRouter** — distributes incoming TDLib updates via `AsyncStream` to the rest of the app.
 - **AppState** — a global `@Observable` object tracking authentication status and shared state.
 - **ViewModels** — each screen has a dedicated `@Observable` view model that consumes updates from the router and exposes UI-ready state.

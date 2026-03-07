@@ -21,7 +21,6 @@ struct FeedView: View {
     @State private var loadOlderTask: Task<Void, Never>?
     @State private var isRefreshing = false
     @State private var refreshTask: Task<Void, Never>?
-    @State private var hasLoadedSinceRest = false
     @State private var scrollPosition = ScrollPosition()
     @State private var bottomRefreshArmed = false
     @State private var bottomPullDistance: CGFloat = 0
@@ -80,7 +79,6 @@ struct FeedView: View {
             channelChangeTask?.cancel()
             loadOlderTask?.cancel()
             loadOlderTask = nil
-            hasLoadedSinceRest = false
             channelChangeTask = Task {
                 let previousItems = viewModel.items
                 let previousTarget = currentAnchorTarget()
@@ -244,11 +242,8 @@ struct FeedView: View {
         .onScrollPhaseChange { _, newPhase in
             isScrollActive = newPhase.isScrolling
             if newPhase.isScrolling {
-                hasLoadedSinceRest = false
                 loadOlderTask?.cancel()
                 loadOlderTask = nil
-            } else {
-                loadOlderIfNeededAtRest()
             }
         }
         .onScrollGeometryChange(
@@ -371,6 +366,7 @@ struct FeedView: View {
 
         viewModel.updateBottomState(isViewportAtBottom, currentPosition: visibleAnchor)
         viewModel.scheduleMarkAsRead(currentPosition: visibleAnchor)
+        requestLoadOlderIfNeeded(at: topAnchor)
     }
 
     private func resolvedItemID(for target: FeedItemID, in items: [FeedItem]? = nil) -> FeedItemID? {
@@ -391,14 +387,14 @@ struct FeedView: View {
         return visibleIDs.sorted { (indexByID[$0] ?? .max) < (indexByID[$1] ?? .max) }
     }
 
-    private func loadOlderIfNeededAtRest() {
+    private func requestLoadOlderIfNeeded(at topAnchor: FeedItemID?) {
         guard !isApplyingChannelChanges,
-              !hasLoadedSinceRest,
-              let topAnchor = viewportAnchorID else {
+              !isRefreshing,
+              let topAnchor,
+              loadOlderTask == nil else {
             return
         }
 
-        hasLoadedSinceRest = true
         loadOlderTask?.cancel()
         loadOlderTask = Task { @MainActor in
             _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)

@@ -4,10 +4,16 @@ import TDLibKit
 extension MessageContent {
     var shouldAppearInFeed: Bool {
         switch self {
+        case .messageText(let messageText):
+            return !messageText.text.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        case .messagePhoto, .messageVideo, .messageAnimation, .messageVoiceNote, .messageAudio:
+            return true
+        case .messageDocument(let document):
+            return !document.caption.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         case .messagePoll:
             return false
         default:
-            return true
+            return false
         }
     }
 

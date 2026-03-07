@@ -29,19 +29,25 @@ actor TDLibService {
 
     private var manager: TDLibClientManager?
     private var client: TDLibClient?
+    private var knownChannels: [Int64: ChannelInfo] = [:]
     let updateRouter = UpdateRouter()
 
     private init() {}
 
     func initialize() {
-        let manager = TDLibClientManager()
-        self.manager = manager
+        if manager == nil {
+            manager = TDLibClientManager()
+        }
+        guard client == nil, let manager else { return }
 
         let router = updateRouter
-        let client = manager.createClient(updateHandler: { data, client in
+        let client = manager.createClient(updateHandler: { [self] data, client in
             do {
                 let update = try client.decoder.decode(Update.self, from: data)
                 router.send(update)
+                Task {
+                    self.handle(update: update, fromClientID: client.id)
+                }
             } catch {
                 // Decoding failures are expected for unsupported update types
             }
@@ -51,6 +57,16 @@ actor TDLibService {
 
     func getClient() -> TDLibClient? {
         client
+    }
+
+    func cachedChannelInfos() -> [Int64: ChannelInfo] {
+        knownChannels
+    }
+
+    func resetLocalData() async throws {
+        guard let client else { throw TDLibServiceError.clientNotInitialized }
+        knownChannels.removeAll()
+        _ = try await client.destroy()
     }
 
     // MARK: - TDLib Parameters
@@ -147,5 +163,48 @@ actor TDLibService {
             size: 0,
             ttl: 0
         )
+    }
+
+    func cacheChannelInfo(from chat: Chat) {
+        guard case .chatTypeSupergroup = chat.type else { return }
+        knownChannels[chat.id] = ChannelInfo(
+            id: chat.id,
+            title: chat.title,
+            avatarFileId: chat.photo?.small.id
+        )
+    }
+
+    private func handle(update: Update, fromClientID clientID: Int32) {
+        switch update {
+        case .updateAuthorizationState(let state):
+            if case .authorizationStateClosed = state.authorizationState,
+               client?.id == clientID {
+                client = nil
+                knownChannels.removeAll()
+                initialize()
+            }
+
+        case .updateNewChat(let value):
+            cacheChannelInfo(from: value.chat)
+
+        case .updateChatTitle(let value):
+            guard let existing = knownChannels[value.chatId] else { break }
+            knownChannels[value.chatId] = ChannelInfo(
+                id: existing.id,
+                title: value.title,
+                avatarFileId: existing.avatarFileId
+            )
+
+        case .updateChatPhoto(let value):
+            let currentTitle = knownChannels[value.chatId]?.title ?? ""
+            knownChannels[value.chatId] = ChannelInfo(
+                id: value.chatId,
+                title: currentTitle,
+                avatarFileId: value.photo?.small.id
+            )
+
+        default:
+            break
+        }
     }
 }

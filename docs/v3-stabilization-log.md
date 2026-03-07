@@ -57,3 +57,7 @@ Date: 2026-03-07
 
 - removed the explicit `.top` snap after upward pagination in the main feed so ordinary scroll completion no longer repositions the visible message
 - strengthened the current-day rebuild to merge the fresh per-channel tail, not just a single latest message, which reduces cases where channel details show a newer post than the unified feed
+- replaced the old pseudo cache clear with a real TDLib local-data reset (`destroy`), which also clears locally selected channels and forces a clean re-login
+- switched TDLib chat discovery away from the initial `100`-chat cap by loading the full main chat list before building channel lists
+- extended TDLib update handling beyond `updateNewMessage`: feed/channel models now react to edits, deletions, read-inbox updates, and channel title/photo changes
+- tightened message filtering so unsupported TDLib message content no longer renders as empty cards

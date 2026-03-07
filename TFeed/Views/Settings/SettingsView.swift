@@ -46,10 +46,15 @@ struct SettingsView: View {
         }
         .confirmationDialog("Clear Cache", isPresented: $showClearCacheConfirmation) {
             Button("Clear Local Cache", role: .destructive) {
-                Task { await viewModel.clearCache() }
+                Task {
+                    await viewModel.clearCache(
+                        context: modelContext,
+                        appState: appState
+                    )
+                }
             }
         } message: {
-            Text("This will remove cached media files. They will be re-downloaded when needed.")
+            Text("This will destroy all local TDLib data, clear selected channels on this device, and return the app to the login state.")
         }
         .confirmationDialog("Log Out", isPresented: $showLogoutConfirmation) {
             Button("Log Out", role: .destructive) {

@@ -2,12 +2,19 @@ import Foundation
 import TDLibKit
 
 extension TDLibService {
-    func loadChats(limit: Int = 100) async throws {
+    func loadChats(limit: Int = 200) async throws {
         guard let client = getClient() else { return }
-        try await client.loadChats(chatList: nil, limit: limit)
+
+        while true {
+            do {
+                _ = try await client.loadChats(chatList: nil, limit: limit)
+            } catch let error as TDLibKit.Error where error.code == 404 {
+                break
+            }
+        }
     }
 
-    func getChats(limit: Int = 100) async throws -> [Int64] {
+    func getChats(limit: Int = 10_000) async throws -> [Int64] {
         guard let client = getClient() else { return [] }
         let result = try await client.getChats(chatList: nil, limit: limit)
         return result.chatIds
@@ -15,6 +22,19 @@ extension TDLibService {
 
     func getChat(chatId: Int64) async throws -> Chat {
         guard let client = getClient() else { throw TDLibServiceError.clientNotInitialized }
-        return try await client.getChat(chatId: chatId)
+        let chat = try await client.getChat(chatId: chatId)
+        cacheChannelInfo(from: chat)
+        return chat
+    }
+
+    func loadAvailableChannels() async throws -> [Int64: ChannelInfo] {
+        try await loadChats()
+
+        let chatIds = try await getChats()
+        for chatId in chatIds {
+            _ = try await getChat(chatId: chatId)
+        }
+
+        return cachedChannelInfos()
     }
 }

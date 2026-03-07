@@ -43,30 +43,31 @@ final class SettingsViewModel {
 
     func refreshChannels() async {
         do {
-            try await TDLibService.shared.loadChats()
-            let chatIds = try await TDLibService.shared.getChats()
-            var newChannels: [ChannelInfo] = []
-            for chatId in chatIds {
-                let chat = try await TDLibService.shared.getChat(chatId: chatId)
-                if case .chatTypeSupergroup = chat.type {
-                    newChannels.append(ChannelInfo(
-                        id: chatId,
-                        title: chat.title,
-                        avatarFileId: chat.photo?.small.id
-                    ))
-                }
-            }
-            allChannels = newChannels.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
+            let channels = try await TDLibService.shared.loadAvailableChannels()
+            allChannels = channels.values.sorted { $0.title.localizedCompare($1.title) == .orderedAscending }
         } catch {
             print("[TFeed] Channel refresh error: \(error)")
         }
     }
 
-    func clearCache() async {
+    func clearCache(context: ModelContext, appState: AppState) async {
         isClearing = true
         defer { isClearing = false }
+
         do {
-            try await TDLibService.shared.optimizeStorage()
+            try await TDLibService.shared.resetLocalData()
+
+            let descriptor = FetchDescriptor<SelectedChannel>()
+            let selectedChannels = try context.fetch(descriptor)
+            for channel in selectedChannels {
+                context.delete(channel)
+            }
+            try context.save()
+
+            selectedIDs = []
+            allChannels = []
+            appState.selectedChannelIDs = []
+            appState.authState = .loading
         } catch { print("[TFeed] Error: \(error)") }
     }
 
