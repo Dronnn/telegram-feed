@@ -438,6 +438,16 @@ struct FeedView: View {
                 return
             }
 
+            if didLoadOlder {
+                await Task.yield()
+
+                if let restoredTop = resolvedItemID(for: topAnchor) {
+                    viewportAnchorID = restoredTop
+                    lastVisiblePosition = restoredTop
+                    scrollPosition.scrollTo(id: restoredTop, anchor: .top)
+                }
+            }
+
             hasLoadedOlderInCurrentDrag = didLoadOlder
 
             loadOlderTask = nil

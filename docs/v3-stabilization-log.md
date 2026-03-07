@@ -80,4 +80,7 @@ Date: 2026-03-07
 - kept edited or re-fetched messages inside the unified chronology if that message was already represented in the visible/deferred history window
 - tightened the upward trigger from `<= 10` hidden items to `< 10`, so the feed does not immediately chain another history fetch right after restoring the preview buffer
 - removed the last programmatic `.top` restore from main-feed upward pagination and made the one-fetch-per-drag gate depend on a real successful older-history load
+- merged deferred older-preview items and freshly fetched older batches into one chronological selection step, which prevents upward scrolling from leaping into week-old preview posts out of order
+- corrected message deduplication to use `chatId + messageId` across feed and channel models, so posts from different channels can no longer suppress each other when Telegram reuses the same per-chat message ID
+- restored the same top visible feed item after each successful upward pagination batch, so inserting older cards above the viewport no longer throws the reader into a much older day
 - re-verified the feed behavior with another full static audit focused on chronology, upward pagination gates, and day-boundary preservation

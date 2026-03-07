@@ -584,8 +584,12 @@ final class ChannelViewModel {
     }
 
     private func uniqueMessages(_ messages: [Message]) -> [Message] {
-        var seen: Set<Int64> = []
-        return messages.filter { seen.insert($0.id).inserted }
+        var seen: Set<FeedItemID> = []
+        return messages.filter { seen.insert(messageKey(for: $0)).inserted }
+    }
+
+    private func messageKey(for message: Message) -> FeedItemID {
+        FeedItemID(chatId: message.chatId, messageId: message.id)
     }
 
     private func expandAlbumEdges(_ messages: [Message]) async -> [Message] {

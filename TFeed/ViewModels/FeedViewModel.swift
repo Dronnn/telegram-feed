@@ -133,10 +133,6 @@ final class FeedViewModel {
         }
 
         let anchorItem = items[itemsAbove]
-        if flushDeferredOlderItems(before: anchorItem, limit: Self.upwardLoadBatchSize) {
-            return true
-        }
-
         return await loadOlder(batchSize: Self.upwardLoadBatchSize, before: anchorItem)
     }
 
@@ -226,7 +222,8 @@ final class FeedViewModel {
             }
         }
 
-        let sortedAdditions = additions.sorted()
+        let deferredCandidates = drainDeferredOlderItems(before: anchorItem)
+        let sortedAdditions = normalizeItems(additions + deferredCandidates).sorted()
         let visibleAdditions: [FeedItem]
         if sortedAdditions.count > Self.upwardLoadBatchSize {
             let deferredBatch = Array(sortedAdditions.dropLast(Self.upwardLoadBatchSize))
@@ -787,7 +784,7 @@ final class FeedViewModel {
     private func loadMessagesForCurrentDay(chatId: Int64, dayStart: Int) async -> ChannelLoadResult {
         let initialLimit = max(initialLoadLimit, refreshPageSize)
         var messages = uniqueMessages(await fetchLatestMessages(chatId: chatId, limit: initialLimit))
-        var seenIDs = Set(messages.map(\.id))
+        var seenIDs = Set(messages.map(messageKey(for:)))
         var reachedBoundary = messages.isEmpty
         var reachedHistoryEnd = messages.count < initialLimit + historyFetchPadding
 
@@ -807,7 +804,7 @@ final class FeedViewModel {
                 fromMessageId: oldestMessageID,
                 limit: refreshPageSize
             )
-            let uniqueOlder = olderBatch.filter { seenIDs.insert($0.id).inserted }
+            let uniqueOlder = olderBatch.filter { seenIDs.insert(messageKey(for: $0)).inserted }
 
             if uniqueOlder.isEmpty {
                 reachedHistoryEnd = true
@@ -1250,17 +1247,18 @@ final class FeedViewModel {
         deferredOlderItems = normalizeItems(deferredOlderItems + uniqueNewItems)
     }
 
-    private func flushDeferredOlderItems(before anchorItem: FeedItem, limit: Int) -> Bool {
-        guard !Task.isCancelled else { return false }
-        let eligibleItems = deferredOlderItems.filter { $0 < anchorItem }.sorted()
-        guard !eligibleItems.isEmpty else { return false }
+    private func drainDeferredOlderItems(before anchorItem: FeedItem?) -> [FeedItem] {
+        guard !deferredOlderItems.isEmpty else { return [] }
 
-        let itemsToInsert = Array(eligibleItems.suffix(limit))
-        let idsToInsert = Set(itemsToInsert.map(\.id))
-        deferredOlderItems.removeAll { idsToInsert.contains($0.id) }
-        extendVisibleHistoryLowerBound(with: itemsToInsert)
-        insertItemsMerged(itemsToInsert)
-        return true
+        let eligibleItems = deferredOlderItems.filter { item in
+            guard let anchorItem else { return true }
+            return item < anchorItem
+        }
+        guard !eligibleItems.isEmpty else { return [] }
+
+        let eligibleIDs = Set(eligibleItems.map(\.id))
+        deferredOlderItems.removeAll { eligibleIDs.contains($0.id) }
+        return eligibleItems.sorted()
     }
 
     private func preferredInitialAnchorID() -> FeedItemID? {
@@ -1393,7 +1391,7 @@ final class FeedViewModel {
 
     private func fetchNewerMessages(chatId: Int64, after messageId: Int64) async -> [Message] {
         var collected: [Message] = []
-        var seen: Set<Int64> = []
+        var seen: Set<FeedItemID> = []
         var cursor = messageId
 
         while true {
@@ -1408,7 +1406,7 @@ final class FeedViewModel {
 
             let newerMessages = batch
                 .filter { $0.id > messageId }
-                .filter { seen.insert($0.id).inserted }
+                .filter { seen.insert(messageKey(for: $0)).inserted }
 
             guard !newerMessages.isEmpty else { break }
 
@@ -1434,8 +1432,12 @@ final class FeedViewModel {
     }
 
     private func uniqueMessages(_ messages: [Message]) -> [Message] {
-        var seen: Set<Int64> = []
-        return messages.filter { seen.insert($0.id).inserted }
+        var seen: Set<FeedItemID> = []
+        return messages.filter { seen.insert(messageKey(for: $0)).inserted }
+    }
+
+    private func messageKey(for message: Message) -> FeedItemID {
+        FeedItemID(chatId: message.chatId, messageId: message.id)
     }
 
     private func canMergeAlbum(_ lhs: FeedItem, _ rhs: FeedItem) -> Bool {
