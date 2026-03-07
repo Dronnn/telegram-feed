@@ -1,5 +1,7 @@
 # Plan v4 — Feed Stabilization & Read State
 
+> Historical planning document. Current shipped feed behavior is described in `README.md`, `docs/plan.md`, and `docs/v3-stabilization-log.md`.
+
 ---
 
 ## About the Project
@@ -115,9 +117,9 @@ TDLibService (actor singleton)
                               SwiftUI Views (auto re-render)
 ```
 
-### Current State (before v4)
+### Current State (historical snapshot before v4)
 
-All phases 1–7 and v3 stabilization are complete. The app builds, auth works, feed displays, media loads, ChannelSheet opens. However, there are serious UX problems: the feed jerks/jumps during scrolling and loading, ChannelSheet jumps around when opening, there is no real read/unread message tracking.
+This section describes the pre-fix state that motivated v4. It is kept as historical context and does not describe the current implementation anymore.
 
 ---
 

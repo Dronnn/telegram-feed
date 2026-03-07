@@ -138,14 +138,11 @@ struct SettingsView: View {
             set: { _ in viewModel.toggle(channel, context: modelContext) }
         )) {
             HStack(spacing: 10) {
-                Circle()
-                    .fill(Color(.tertiarySystemFill))
-                    .frame(width: 28, height: 28)
-                    .overlay {
-                        Text(String(channel.title.prefix(1)).uppercased())
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    }
+                ChannelAvatarView(
+                    title: channel.title,
+                    avatarFileId: channel.avatarFileId,
+                    size: 28
+                )
 
                 Text(channel.title)
             }

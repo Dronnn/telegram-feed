@@ -32,3 +32,23 @@ Date: 2026-03-06
 
 - keep unrelated local changes out of the release commit
 - stage only product source and product documentation related to this stabilization pass
+
+---
+
+## Stabilization continuation
+
+Date: 2026-03-07
+
+### Feed interaction hardening
+
+- bottom `pull-to-refresh` is now an explicit release gesture instead of an automatic refresh triggered by ordinary scrolling
+- current-day refresh rebuilds the feed from local midnight to now across all selected channels
+- viewport restoration keeps the same visible anchor after manual refresh so unread/newer messages stay below the current screen
+- upward pagination restores the same top anchor after inserting older messages, which removes visible jumps while browsing older posts
+- automatic top trimming was removed from the browsing path to avoid unexpected position shifts
+
+### Content consistency
+
+- today's rebuild explicitly re-checks the latest message in each selected channel so the newest post is not dropped from the unified feed
+- real Telegram channel avatars now appear in feed cards, channel sheets, and settings, with initial-based fallback when no photo is available
+- public README and planning docs were updated to describe the current shipped behavior rather than older planning assumptions

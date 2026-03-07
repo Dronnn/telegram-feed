@@ -324,20 +324,20 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		A1B2C3D4E5F60C00000A0001 /* Build configuration list for PBXProject "TFeed" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				A1B2C3D4E5F60D00000A0001 /* Debug */,
-				A1B2C3D4E5F60E00000A0001 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
 		A1B2C3D4E5F60700000A0001 /* Build configuration list for PBXNativeTarget "TFeed" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				A1B2C3D4E5F60F00000A0001 /* Debug */,
 				A1B2C3D4E5F61000000A0001 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1B2C3D4E5F60C00000A0001 /* Build configuration list for PBXProject "TFeed" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A1B2C3D4E5F60D00000A0001 /* Debug */,
+				A1B2C3D4E5F60E00000A0001 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

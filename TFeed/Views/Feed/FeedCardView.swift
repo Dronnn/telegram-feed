@@ -14,14 +14,11 @@ struct FeedCardView: View {
                 onChannelTap?()
             } label: {
                 HStack(spacing: 8) {
-                    Circle()
-                        .fill(Color(.tertiarySystemFill))
-                        .frame(width: 32, height: 32)
-                        .overlay {
-                            Text(String(item.channelTitle.prefix(1)).uppercased())
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                        }
+                    ChannelAvatarView(
+                        title: item.channelTitle,
+                        avatarFileId: item.avatarFileId,
+                        size: 32
+                    )
 
                     Text(item.channelTitle)
                         .font(.subheadline.weight(.semibold))

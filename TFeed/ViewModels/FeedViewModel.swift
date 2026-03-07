@@ -258,6 +258,7 @@ final class FeedViewModel {
             channelOldestMessageIDs = [:]
             channelsWithFullHistoryLoaded = []
             deferredOlderItems = []
+            bufferedIncomingMessages.removeAll()
 
             guard !activeIDs.isEmpty else {
                 performStableMutation {
@@ -689,11 +690,32 @@ final class FeedViewModel {
         let dayMessages = uniqueMessages(messages)
             .filter { $0.date >= dayStart }
 
+        let ensuredMessages = await ensureLatestMessageIncluded(
+            in: dayMessages,
+            chatId: chatId,
+            dayStart: dayStart
+        )
+
         return ChannelLoadResult(
             chatId: chatId,
-            messages: dayMessages,
+            messages: ensuredMessages,
             reachedOldest: true
         )
+    }
+
+    private func ensureLatestMessageIncluded(
+        in messages: [Message],
+        chatId: Int64,
+        dayStart: Int
+    ) async -> [Message] {
+        let latest = await fetchHistoryBatch(chatId: chatId, fromMessageId: 0, limit: 1)
+        guard let newest = latest.first,
+              newest.date >= dayStart,
+              !messages.contains(where: { $0.id == newest.id }) else {
+            return messages
+        }
+
+        return uniqueMessages(messages + [newest])
     }
 
     private func applyIncomingMessage(_ message: Message, allowBuffering: Bool = true) {

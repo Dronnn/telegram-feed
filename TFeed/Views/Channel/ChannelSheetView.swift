@@ -91,14 +91,11 @@ struct ChannelSheetView: View {
     }
 
     private var channelAvatar: some View {
-        Circle()
-            .fill(Color(.tertiarySystemFill))
-            .frame(width: 36, height: 36)
-            .overlay {
-                Text(String(channelInfo.title.prefix(1)).uppercased())
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
+        ChannelAvatarView(
+            title: channelInfo.title,
+            avatarFileId: channelInfo.avatarFileId,
+            size: 36
+        )
     }
 
     private var messageList: some View {

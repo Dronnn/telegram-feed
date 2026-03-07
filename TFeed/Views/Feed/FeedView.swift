@@ -18,13 +18,15 @@ struct FeedView: View {
     @State private var isScrollActive = false
     @State private var isViewportAtBottom = true
     @State private var channelChangeTask: Task<Void, Never>?
-    @State private var trimTask: Task<Void, Never>?
     @State private var loadOlderTask: Task<Void, Never>?
     @State private var isRefreshing = false
     @State private var refreshTask: Task<Void, Never>?
     @State private var hasLoadedSinceRest = false
     @State private var scrollPosition = ScrollPosition()
     @State private var bottomRefreshArmed = false
+    @State private var bottomPullDistance: CGFloat = 0
+
+    private let bottomRefreshThreshold: CGFloat = 60
 
     var body: some View {
         NavigationStack {
@@ -64,7 +66,6 @@ struct FeedView: View {
             isContentReady = true
         }
         .onDisappear {
-            trimTask?.cancel()
             loadOlderTask?.cancel()
             refreshTask?.cancel()
             channelChangeTask?.cancel()
@@ -224,8 +225,8 @@ struct FeedView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if isRefreshing {
-                loadingOverlay
+            if isRefreshing || bottomPullDistance > 0 {
+                bottomRefreshOverlay
                     .padding(.bottom, 8)
             }
         }
@@ -234,6 +235,12 @@ struct FeedView: View {
             pendingScrollID = nil
             scrollPosition.scrollTo(id: target, anchor: .center)
         }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 1)
+                .onEnded { _ in
+                    completeBottomRefreshIfNeeded()
+                }
+        )
         .onScrollPhaseChange { _, newPhase in
             isScrollActive = newPhase.isScrolling
             if newPhase.isScrolling {
@@ -241,8 +248,6 @@ struct FeedView: View {
                 loadOlderTask?.cancel()
                 loadOlderTask = nil
             } else {
-                completeBottomRefreshIfNeeded()
-                scheduleTrim(at: currentTopAnchorTarget())
                 loadOlderIfNeededAtRest()
             }
         }
@@ -261,15 +266,27 @@ struct FeedView: View {
             for: Bool.self,
             of: { geometry in
                 let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-                let overscroll = visibleBottom - geometry.contentSize.height
-                return overscroll > 60
+                let overscroll = max(visibleBottom - geometry.contentSize.height, 0)
+                return overscroll >= bottomRefreshThreshold
             },
             action: { _, triggered in
                 guard !isRefreshing else { return }
                 if triggered {
                     bottomRefreshArmed = true
-                } else {
-                    completeBottomRefreshIfNeeded()
+                }
+            }
+        )
+        .onScrollGeometryChange(
+            for: CGFloat.self,
+            of: { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                return max(visibleBottom - geometry.contentSize.height, 0)
+            },
+            action: { _, newValue in
+                guard !isRefreshing else { return }
+                bottomPullDistance = newValue
+                if newValue <= 0 {
+                    bottomRefreshArmed = false
                 }
             }
         )
@@ -310,15 +327,29 @@ struct FeedView: View {
             .background(.ultraThinMaterial, in: Capsule())
     }
 
-    private func scheduleTrim(at position: FeedItemID?) {
-        trimTask?.cancel()
-        guard let position, !isScrollActive else { return }
+    private var bottomRefreshOverlay: some View {
+        HStack(spacing: 10) {
+            ProgressView()
+                .controlSize(.small)
 
-        trimTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(150))
-            guard !Task.isCancelled else { return }
-            viewModel.trimTopIfNeeded(currentPosition: position)
+            Text(bottomRefreshLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial, in: Capsule())
+        .opacity(isRefreshing || bottomPullDistance > 0 ? 1 : 0)
+    }
+
+    private var bottomRefreshLabel: String {
+        if isRefreshing {
+            return "Refreshing today"
+        }
+        if bottomRefreshArmed || bottomPullDistance >= bottomRefreshThreshold {
+            return "Release to refresh"
+        }
+        return "Pull to refresh"
     }
 
     private func handleVisibleTargets(_ visibleIDs: [FeedItemID]) {
@@ -339,7 +370,6 @@ struct FeedView: View {
         guard let visibleAnchor = readingAnchor ?? topAnchor else { return }
 
         viewModel.updateBottomState(isViewportAtBottom, currentPosition: visibleAnchor)
-        scheduleTrim(at: topAnchor)
         viewModel.scheduleMarkAsRead(currentPosition: visibleAnchor)
     }
 
@@ -370,17 +400,27 @@ struct FeedView: View {
 
         hasLoadedSinceRest = true
         loadOlderTask?.cancel()
-        loadOlderTask = Task {
-            _ = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
-            if !Task.isCancelled { loadOlderTask = nil }
+        loadOlderTask = Task { @MainActor in
+            let didLoad = await viewModel.loadOlderIfNeeded(currentPosition: topAnchor)
+            guard !Task.isCancelled else { return }
+
+            if didLoad, let resolvedAnchor = resolvedItemID(for: topAnchor) {
+                viewportAnchorID = resolvedAnchor
+                lastVisiblePosition = resolvedAnchor
+                scrollPosition = ScrollPosition(id: resolvedAnchor, anchor: .top)
+            }
+
+            loadOlderTask = nil
         }
     }
 
     private func triggerBottomRefresh() {
         refreshTask?.cancel()
         isRefreshing = true
+        bottomPullDistance = 0
+        bottomRefreshArmed = false
         let previousItems = viewModel.items
-        let previousTarget = currentAnchorTarget()
+        let previousTarget = currentTopAnchorTarget() ?? currentAnchorTarget()
 
         refreshTask = Task { @MainActor in
             async let minimumDelay: () = Task.sleep(for: .milliseconds(800))
@@ -399,7 +439,7 @@ struct FeedView: View {
                 viewModel.updateBottomState(isAtBottom, currentPosition: replacement)
                 scrollPosition = ScrollPosition(
                     id: replacement,
-                    anchor: isAtBottom ? .bottom : .center
+                    anchor: isAtBottom ? .bottom : .top
                 )
             } else {
                 setupScrollPosition()
@@ -411,7 +451,9 @@ struct FeedView: View {
     }
 
     private func completeBottomRefreshIfNeeded() {
-        guard bottomRefreshArmed, !isRefreshing, !isScrollActive else { return }
+        guard bottomRefreshArmed,
+              bottomPullDistance >= bottomRefreshThreshold,
+              !isRefreshing else { return }
         bottomRefreshArmed = false
         triggerBottomRefresh()
     }
