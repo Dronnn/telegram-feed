@@ -27,9 +27,11 @@ final class FeedViewModel {
     private let initialLoadLimit = 30
     private let refreshPageSize = 50
     private let historyFetchPadding = 8
-    static let upwardBufferSize = 30
-    private static let upwardTrimThreshold = upwardBufferSize + 15
-    private static let upwardLoadTriggerThreshold = 5
+    private let albumBoundaryFetchSize = 12
+    static let upwardPreviewCount = 10
+    private static let upwardLoadBatchSize = 10
+    private static let upwardTrimThreshold = upwardPreviewCount + upwardLoadBatchSize
+    private static let upwardLoadTriggerThreshold = upwardPreviewCount - 1
 
     // MARK: - Public
 
@@ -108,7 +110,7 @@ final class FeedViewModel {
         }
 
         let anchorItem = items[itemsAbove]
-        if flushDeferredOlderItems(before: anchorItem) {
+        if flushDeferredOlderItems(before: anchorItem, limit: Self.upwardLoadBatchSize) {
             return true
         }
 
@@ -116,12 +118,10 @@ final class FeedViewModel {
             return false
         }
 
-        let deficit = Self.upwardBufferSize - itemsAbove
-        guard deficit > 0 else { return false }
-        return await loadOlder(deficit: deficit, before: anchorItem)
+        return await loadOlder(batchSize: Self.upwardLoadBatchSize, before: anchorItem)
     }
 
-    private func loadOlder(deficit: Int, before anchorItem: FeedItem? = nil) async -> Bool {
+    private func loadOlder(batchSize: Int, before anchorItem: FeedItem? = nil) async -> Bool {
         guard !Task.isCancelled else { return false }
         guard !isLoadingMore, !activeChannelIDs.isEmpty else { return false }
         isLoadingMore = true
@@ -131,7 +131,7 @@ final class FeedViewModel {
         guard !activeIDs.isEmpty else { return false }
 
         let numChannels = max(activeIDs.count, 1)
-        let perChannelLimit = max(Int(ceil(Double(deficit) / Double(numChannels))), 3)
+        let perChannelLimit = max(Int(ceil(Double(batchSize) / Double(numChannels))), 1)
 
         var olderMessagesByChannel: [Int64: [Message]] = [:]
 
@@ -192,8 +192,19 @@ final class FeedViewModel {
             }
         }
 
-        if !additions.isEmpty {
-            insertItemsMerged(additions)
+        let sortedAdditions = additions.sorted()
+        let visibleAdditions: [FeedItem]
+        if sortedAdditions.count > Self.upwardLoadBatchSize {
+            let deferredBatch = Array(sortedAdditions.dropLast(Self.upwardLoadBatchSize))
+            bufferDeferredOlderItems(deferredBatch)
+            bufferedDeferredItems = true
+            visibleAdditions = Array(sortedAdditions.suffix(Self.upwardLoadBatchSize))
+        } else {
+            visibleAdditions = sortedAdditions
+        }
+
+        if !visibleAdditions.isEmpty {
+            insertItemsMerged(visibleAdditions)
             return true
         }
 
@@ -228,6 +239,66 @@ final class FeedViewModel {
         }
     }
 
+    func reloadCurrentDay(selectedIDs: Set<Int64>) async {
+        guard !isLoading else { return }
+        if listeningTask == nil {
+            startListening()
+        }
+
+        isLoading = true
+        errorMessage = nil
+        defer { isLoading = false }
+
+        do {
+            try await TDLibService.shared.loadChats()
+            channels = try await loadChannels()
+
+            let activeIDs = selectedIDs.intersection(Set(channels.keys))
+            activeChannelIDs = activeIDs
+            channelOldestMessageIDs = [:]
+            channelsWithFullHistoryLoaded = []
+            deferredOlderItems = []
+
+            guard !activeIDs.isEmpty else {
+                performStableMutation {
+                    items = []
+                }
+                unreadCount = 0
+                isAtBottom = true
+                bufferedIncomingMessages.removeAll()
+                return
+            }
+
+            let dayStart = Int(Calendar.current.startOfDay(for: Date()).timeIntervalSince1970)
+            var collected: [FeedItem] = []
+
+            await withTaskGroup(of: ChannelLoadResult.self) { group in
+                for chatId in activeIDs {
+                    group.addTask {
+                        await self.loadMessagesForCurrentDay(chatId: chatId, dayStart: dayStart)
+                    }
+                }
+
+                for await result in group {
+                    if let oldest = result.messages.map(\.id).min() {
+                        channelOldestMessageIDs[result.chatId] = oldest
+                    }
+                    if result.reachedOldest {
+                        channelsWithFullHistoryLoaded.insert(result.chatId)
+                    }
+                    collected.append(contentsOf: makeItems(from: result.messages))
+                }
+            }
+
+            performStableMutation {
+                items = normalizeItems(collected)
+            }
+            applyBufferedIncomingMessages()
+        } catch {
+            errorMessage = "Unable to load feed. Check your connection."
+        }
+    }
+
     func applyChannelChanges(newIDs: Set<Int64>) async {
         let unknownIDs = newIDs.subtracting(Set(channels.keys))
         for chatId in unknownIDs {
@@ -249,6 +320,10 @@ final class FeedViewModel {
         let addedIDs = validNewIDs.subtracting(activeChannelIDs)
 
         guard !removedIDs.isEmpty || !addedIDs.isEmpty else { return }
+
+        // Flip the active set immediately so live updates for newly selected
+        // channels are not dropped while the initial fetch is still running.
+        activeChannelIDs = validNewIDs
 
         if !removedIDs.isEmpty {
             performStableMutation {
@@ -286,8 +361,6 @@ final class FeedViewModel {
                 insertItemsMerged(added)
             }
         }
-
-        activeChannelIDs = validNewIDs
     }
 
     func startListening() {
@@ -340,7 +413,7 @@ final class FeedViewModel {
               let currentIndex = items.firstIndex(where: { $0.matches(currentPosition) }) else { return }
 
         guard currentIndex > Self.upwardTrimThreshold else { return }
-        trimItemsBeforeIndex(currentIndex, keepingPreviewCount: Self.upwardBufferSize)
+        trimItemsBeforeIndex(currentIndex, keepingPreviewCount: Self.upwardPreviewCount)
     }
 
     func syncReadState(chatId: Int64, lastReadMessageId: Int64, currentPosition: FeedItemID?) {
@@ -427,13 +500,34 @@ final class FeedViewModel {
 
     private func fetchLatestMessages(chatId: Int64, limit: Int) async -> [Message] {
         guard !Task.isCancelled else { return [] }
+        let latest = await fetchHistoryBatch(chatId: chatId, fromMessageId: 0, limit: 1)
+        guard let newest = latest.first else { return [] }
+        let messages = await fetchHistoryBatch(
+            chatId: chatId,
+            fromMessageId: newest.id,
+            limit: limit + historyFetchPadding
+        )
+        return await expandAlbumEdges(chatId: chatId, messages: messages)
+    }
+
+    private func fetchMessages(chatId: Int64, fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
+        let messages = await fetchHistoryBatch(
+            chatId: chatId,
+            fromMessageId: fromMessageId,
+            limit: limit + historyFetchPadding,
+            offset: offset
+        )
+        return await expandAlbumEdges(chatId: chatId, messages: messages)
+    }
+
+    private func fetchHistoryBatch(chatId: Int64, fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
+        guard !Task.isCancelled else { return [] }
         do {
-            let latest = try await TDLibService.shared.getChatHistory(chatId: chatId, limit: 1)
-            guard let newest = latest.first else { return [] }
             let messages = try await TDLibService.shared.getChatHistory(
                 chatId: chatId,
-                fromMessageId: newest.id,
-                limit: limit + historyFetchPadding
+                fromMessageId: fromMessageId,
+                limit: limit,
+                offset: offset
             )
             guard !Task.isCancelled else { return [] }
             return messages
@@ -442,20 +536,99 @@ final class FeedViewModel {
         }
     }
 
-    private func fetchMessages(chatId: Int64, fromMessageId: Int64, limit: Int, offset: Int = 0) async -> [Message] {
-        guard !Task.isCancelled else { return [] }
-        do {
-            let messages = try await TDLibService.shared.getChatHistory(
+    private func expandAlbumEdges(chatId: Int64, messages: [Message]) async -> [Message] {
+        let unique = uniqueMessages(messages)
+        guard !unique.isEmpty else { return [] }
+
+        let sorted = unique.sorted { $0.id < $1.id }
+        var expanded = unique
+
+        if let oldest = sorted.first {
+            expanded.append(contentsOf: await fetchAlbumBoundarySiblings(
                 chatId: chatId,
-                fromMessageId: fromMessageId,
-                limit: limit + historyFetchPadding,
-                offset: offset
-            )
-            guard !Task.isCancelled else { return [] }
-            return messages
-        } catch {
-            return []
+                boundary: oldest,
+                direction: .older
+            ))
         }
+
+        if let newest = sorted.last {
+            expanded.append(contentsOf: await fetchAlbumBoundarySiblings(
+                chatId: chatId,
+                boundary: newest,
+                direction: .newer
+            ))
+        }
+
+        return uniqueMessages(expanded)
+    }
+
+    private func fetchAlbumBoundarySiblings(
+        chatId: Int64,
+        boundary: Message,
+        direction: AlbumBoundaryDirection
+    ) async -> [Message] {
+        guard let albumID = normalizedAlbumID(for: boundary) else { return [] }
+
+        var cursor = boundary.id
+        var collected: [Message] = []
+
+        while !Task.isCancelled {
+            let batch: [Message]
+            switch direction {
+            case .older:
+                batch = await fetchHistoryBatch(
+                    chatId: chatId,
+                    fromMessageId: cursor,
+                    limit: albumBoundaryFetchSize
+                )
+            case .newer:
+                batch = await fetchHistoryBatch(
+                    chatId: chatId,
+                    fromMessageId: cursor,
+                    limit: albumBoundaryFetchSize,
+                    offset: -(albumBoundaryFetchSize - 1)
+                )
+            }
+
+            guard !batch.isEmpty else { break }
+
+            let candidates = batch
+                .filter {
+                    switch direction {
+                    case .older:
+                        return $0.id < cursor
+                    case .newer:
+                        return $0.id > cursor
+                    }
+                }
+                .sorted { lhs, rhs in
+                    switch direction {
+                    case .older:
+                        return lhs.id > rhs.id
+                    case .newer:
+                        return lhs.id < rhs.id
+                    }
+                }
+
+            guard !candidates.isEmpty else { break }
+
+            var advanced = false
+            for message in candidates {
+                if normalizedAlbumID(for: message) == albumID {
+                    collected.append(message)
+                    cursor = message.id
+                    advanced = true
+                } else {
+                    return collected
+                }
+            }
+
+            if !advanced || candidates.count < albumBoundaryFetchSize - 1 {
+                break
+            }
+        }
+
+        return collected
     }
 
     private func loadInitialMessages(
@@ -469,6 +642,57 @@ final class FeedViewModel {
             chatId: chatId,
             messages: messages,
             reachedOldest: reachedOldest
+        )
+    }
+
+    private func loadMessagesForCurrentDay(chatId: Int64, dayStart: Int) async -> ChannelLoadResult {
+        let initialLimit = max(initialLoadLimit, refreshPageSize)
+        var messages = uniqueMessages(await fetchLatestMessages(chatId: chatId, limit: initialLimit))
+        var seenIDs = Set(messages.map(\.id))
+        var reachedBoundary = messages.isEmpty
+        var reachedHistoryEnd = messages.count < initialLimit + historyFetchPadding
+
+        while !reachedBoundary, !reachedHistoryEnd, !Task.isCancelled {
+            guard let oldestMessageID = messages.map(\.id).min(),
+                  let oldestDate = messages.map(\.date).min() else {
+                break
+            }
+
+            if oldestDate < dayStart {
+                reachedBoundary = true
+                break
+            }
+
+            let olderBatch = await fetchMessages(
+                chatId: chatId,
+                fromMessageId: oldestMessageID,
+                limit: refreshPageSize
+            )
+            let uniqueOlder = olderBatch.filter { seenIDs.insert($0.id).inserted }
+
+            if uniqueOlder.isEmpty {
+                reachedHistoryEnd = true
+                break
+            }
+
+            messages.append(contentsOf: uniqueOlder)
+
+            if uniqueOlder.contains(where: { $0.date < dayStart }) {
+                reachedBoundary = true
+            }
+
+            if olderBatch.count < refreshPageSize + historyFetchPadding {
+                reachedHistoryEnd = true
+            }
+        }
+
+        let dayMessages = uniqueMessages(messages)
+            .filter { $0.date >= dayStart }
+
+        return ChannelLoadResult(
+            chatId: chatId,
+            messages: dayMessages,
+            reachedOldest: true
         )
     }
 
@@ -486,12 +710,8 @@ final class FeedViewModel {
             return
         }
 
-        performStableMutation {
-            let insertionIndex = items.firstIndex(where: { $0 > item }) ?? items.endIndex
-            items.insert(item, at: insertionIndex)
-        }
-
-        if !isRead(item) {
+        let visibleDelta = insertItemsMerged([item])
+        if visibleDelta > 0, !isRead(item) {
             unreadCount += 1
         }
     }
@@ -528,8 +748,9 @@ final class FeedViewModel {
         normalizeItems(messages.compactMap { makeItem(from: $0) })
     }
 
-    private func insertItemsMerged(_ newItems: [FeedItem]) {
-        guard !newItems.isEmpty else { return }
+    @discardableResult
+    private func insertItemsMerged(_ newItems: [FeedItem]) -> Int {
+        guard !newItems.isEmpty else { return 0 }
 
         let existingIDs = representedMessageIDs(in: items + deferredOlderItems, chatId: nil)
         let uniqueNewItems = newItems.filter { newItem in
@@ -539,14 +760,21 @@ final class FeedViewModel {
             return !isDuplicate
         }
 
-        guard !uniqueNewItems.isEmpty else { return }
+        guard !uniqueNewItems.isEmpty else { return 0 }
+
+        let previousCount = items.count
 
         performStableMutation {
             for newItem in uniqueNewItems {
-                let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
-                items.insert(newItem, at: insertionIndex)
+                if let mergedItem = mergeIntoExistingAlbumIfNeeded(newItem) {
+                    insertSorted(mergedItem)
+                } else {
+                    insertSorted(newItem)
+                }
             }
         }
+
+        return items.count - previousCount
     }
 
     private func bufferDeferredOlderItems(_ newItems: [FeedItem]) {
@@ -564,11 +792,12 @@ final class FeedViewModel {
         deferredOlderItems = normalizeItems(deferredOlderItems + uniqueNewItems)
     }
 
-    private func flushDeferredOlderItems(before anchorItem: FeedItem) -> Bool {
+    private func flushDeferredOlderItems(before anchorItem: FeedItem, limit: Int) -> Bool {
         guard !Task.isCancelled else { return false }
-        let itemsToInsert = deferredOlderItems.filter { $0 < anchorItem }
-        guard !itemsToInsert.isEmpty else { return false }
+        let eligibleItems = deferredOlderItems.filter { $0 < anchorItem }.sorted()
+        guard !eligibleItems.isEmpty else { return false }
 
+        let itemsToInsert = Array(eligibleItems.suffix(limit))
         let idsToInsert = Set(itemsToInsert.map(\.id))
         deferredOlderItems.removeAll { idsToInsert.contains($0.id) }
         insertItemsMerged(itemsToInsert)
@@ -590,8 +819,7 @@ final class FeedViewModel {
 
         if let currentIndex = items.firstIndex(where: { $0.matches(targetID) }),
            currentIndex < previewCount {
-            let deficit = previewCount - currentIndex
-            _ = await loadOlder(deficit: deficit)
+            _ = await loadOlder(batchSize: Self.upwardLoadBatchSize)
         }
 
         guard let resolvedTarget = items.first(where: { $0.matches(targetID) })?.id,
@@ -643,7 +871,7 @@ final class FeedViewModel {
                 ? item
                 : FeedItem(
                     chatId: item.chatId,
-                    messageId: item.messageId,
+                    messageId: unseenRepresentedIDs.max() ?? item.messageId,
                     date: item.date,
                     formattedText: item.formattedText,
                     channelTitle: item.channelTitle,
@@ -774,8 +1002,8 @@ final class FeedViewModel {
 
         return FeedItem(
             chatId: lhs.chatId,
-            messageId: lhs.messageId,
-            date: min(lhs.date, rhs.date),
+            messageId: representedMessageIds.max() ?? lhs.messageId,
+            date: max(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,
             avatarFileId: lhs.avatarFileId,
@@ -791,6 +1019,23 @@ final class FeedViewModel {
         return albumID == 0 ? nil : albumID
     }
 
+    private func mergeIntoExistingAlbumIfNeeded(_ item: FeedItem) -> FeedItem? {
+        guard let albumID = item.mediaAlbumId,
+              let existingIndex = items.lastIndex(where: {
+                  $0.chatId == item.chatId && $0.mediaAlbumId == albumID
+              }) else {
+            return nil
+        }
+
+        let existingItem = items.remove(at: existingIndex)
+        return mergeAlbumItems(existingItem, item)
+    }
+
+    private func insertSorted(_ item: FeedItem) {
+        let insertionIndex = items.firstIndex(where: { $0 > item }) ?? items.endIndex
+        items.insert(item, at: insertionIndex)
+    }
+
     private func representedMessageIDs(in items: [FeedItem], chatId: Int64?) -> Set<FeedItemID> {
         Set(
             items
@@ -802,6 +1047,11 @@ final class FeedViewModel {
                 }
         )
     }
+}
+
+private enum AlbumBoundaryDirection {
+    case older
+    case newer
 }
 
 private struct ChannelLoadResult: Sendable {

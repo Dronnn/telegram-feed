@@ -27,24 +27,29 @@ struct FeedCardView: View {
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(Color(.label))
 
-                    Text("\u{00B7}")
-                        .foregroundStyle(.secondary)
-
-                    Text(relativeTime(for: item.date))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    if isRead {
-                        Image(systemName: "checkmark")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Circle()
-                            .fill(Color.accentColor)
-                            .frame(width: 6, height: 6)
-                    }
-
                     Spacer()
+
+                    VStack(alignment: .trailing, spacing: 2) {
+                        HStack(spacing: 4) {
+                            Text(relativeTime(for: item.date))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            if isRead {
+                                Image(systemName: "checkmark")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Circle()
+                                    .fill(Color.accentColor)
+                                    .frame(width: 6, height: 6)
+                            }
+                        }
+
+                        Text(exactTimestamp(for: item.date))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .buttonStyle(.plain)

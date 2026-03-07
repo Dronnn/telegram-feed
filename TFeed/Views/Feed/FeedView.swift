@@ -24,7 +24,7 @@ struct FeedView: View {
     @State private var refreshTask: Task<Void, Never>?
     @State private var hasLoadedSinceRest = false
     @State private var scrollPosition = ScrollPosition()
-    private let bottomScrollAnchorID = "feed-bottom-anchor"
+    @State private var bottomRefreshArmed = false
 
     var body: some View {
         NavigationStack {
@@ -194,111 +194,110 @@ struct FeedView: View {
     }
 
     private var feedContent: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    ForEach(viewModel.items) { item in
-                        FeedCardView(
-                            item: item,
-                            isRead: viewModel.isRead(item),
-                            onChannelTap: { openChannel(for: item.id) },
-                            onTelegramLinkTap: { target in openChannel(for: target) },
-                            onPostReferenceTap: { reference in openChannel(for: reference.target) }
-                        )
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .id(item.id)
-                    }
-
-                    Color.clear
-                        .frame(height: 1)
-                        .id(bottomScrollAnchorID)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .scrollTargetLayout()
-            }
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .scrollPosition($scrollPosition)
-            .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.01) { visibleIDs in
-                handleVisibleTargets(visibleIDs)
-            }
-            .overlay(alignment: .top) {
-                if viewModel.isLoadingMore {
-                    loadingOverlay
-                        .padding(.top, 8)
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(viewModel.items) { item in
+                    FeedCardView(
+                        item: item,
+                        isRead: viewModel.isRead(item),
+                        onChannelTap: { openChannel(for: item.id) },
+                        onTelegramLinkTap: { target in openChannel(for: target) },
+                        onPostReferenceTap: { reference in openChannel(for: reference.target) }
+                    )
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 6)
+                    .id(item.id)
                 }
             }
-            .overlay(alignment: .bottom) {
-                if isRefreshing {
-                    loadingOverlay
-                        .padding(.bottom, 8)
-                }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .scrollTargetLayout()
+        }
+        .scrollEdgeEffectStyle(.soft, for: .all)
+        .scrollPosition($scrollPosition)
+        .onScrollTargetVisibilityChange(idType: FeedItemID.self, threshold: 0.01) { visibleIDs in
+            handleVisibleTargets(visibleIDs)
+        }
+        .overlay(alignment: .top) {
+            if viewModel.isLoadingMore {
+                loadingOverlay
+                    .padding(.top, 8)
             }
-            .onChange(of: pendingScrollID) { _, target in
-                guard let target else { return }
-                pendingScrollID = nil
-                scrollPosition.scrollTo(id: target, anchor: .center)
+        }
+        .overlay(alignment: .bottom) {
+            if isRefreshing {
+                loadingOverlay
+                    .padding(.bottom, 8)
             }
-            .onScrollPhaseChange { _, newPhase in
-                isScrollActive = newPhase.isScrolling
-                if newPhase.isScrolling {
-                    hasLoadedSinceRest = false
-                    loadOlderTask?.cancel()
-                    loadOlderTask = nil
+        }
+        .onChange(of: pendingScrollID) { _, target in
+            guard let target else { return }
+            pendingScrollID = nil
+            scrollPosition.scrollTo(id: target, anchor: .center)
+        }
+        .onScrollPhaseChange { _, newPhase in
+            isScrollActive = newPhase.isScrolling
+            if newPhase.isScrolling {
+                hasLoadedSinceRest = false
+                loadOlderTask?.cancel()
+                loadOlderTask = nil
+            } else {
+                completeBottomRefreshIfNeeded()
+                scheduleTrim(at: currentTopAnchorTarget())
+                loadOlderIfNeededAtRest()
+            }
+        }
+        .onScrollGeometryChange(
+            for: Bool.self,
+            of: { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                return visibleBottom >= geometry.contentSize.height - 24
+            },
+            action: { _, newValue in
+                isViewportAtBottom = newValue
+                viewModel.updateBottomState(newValue, currentPosition: currentAnchorTarget())
+            }
+        )
+        .onScrollGeometryChange(
+            for: Bool.self,
+            of: { geometry in
+                let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
+                let overscroll = visibleBottom - geometry.contentSize.height
+                return overscroll > 60
+            },
+            action: { _, triggered in
+                guard !isRefreshing else { return }
+                if triggered {
+                    bottomRefreshArmed = true
                 } else {
-                    scheduleTrim(at: currentTopAnchorTarget())
-                    loadOlderIfNeededAtRest()
+                    completeBottomRefreshIfNeeded()
                 }
             }
-            .onScrollGeometryChange(
-                for: Bool.self,
-                of: { geometry in
-                    let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-                    return visibleBottom >= geometry.contentSize.height - 24
-                },
-                action: { _, newValue in
-                    isViewportAtBottom = newValue
-                    viewModel.updateBottomState(newValue, currentPosition: currentAnchorTarget())
-                }
-            )
-            .onScrollGeometryChange(
-                for: Bool.self,
-                of: { geometry in
-                    let visibleBottom = geometry.contentOffset.y + geometry.containerSize.height - geometry.contentInsets.bottom
-                    let overscroll = visibleBottom - geometry.contentSize.height
-                    return overscroll > 60
-                },
-                action: { _, triggered in
-                    guard triggered, !isRefreshing else { return }
-                    triggerBottomRefresh()
-                }
-            )
-            .overlay(alignment: .bottomTrailing) {
-                if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
-                    Button {
-                        scrollToBottom(using: proxy)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "chevron.down")
-                                .font(.body.weight(.semibold))
+        )
+        .overlay(alignment: .bottomTrailing) {
+            if !viewModel.isAtBottom || viewModel.unreadCount > 0 {
+                Button {
+                    scrollToBottom()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.down")
+                            .font(.body.weight(.semibold))
 
-                            if viewModel.unreadCount > 0 {
-                                Text("\(viewModel.unreadCount)")
-                                    .font(.caption2.weight(.bold))
-                            }
+                        if viewModel.unreadCount > 0 {
+                            Text("\(viewModel.unreadCount)")
+                                .font(.caption2.weight(.bold))
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 10)
-                        .background(Color.clear, in: Capsule())
-                        .glassEffect(.regular.interactive(), in: .capsule)
-                        .contentShape(Capsule())
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Scroll to bottom")
-                    .zIndex(1)
-                    .transition(.scale.combined(with: .opacity))
-                    .padding(20)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Color.clear, in: Capsule())
+                    .glassEffect(.regular.interactive(), in: .capsule)
+                    .contentShape(Capsule())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Scroll to bottom")
+                .zIndex(1)
+                .transition(.scale.combined(with: .opacity))
+                .padding(20)
             }
         }
     }
@@ -380,20 +379,54 @@ struct FeedView: View {
     private func triggerBottomRefresh() {
         refreshTask?.cancel()
         isRefreshing = true
-        refreshTask = Task {
-            async let refreshResult: () = viewModel.refresh(
-                selectedIDs: appState.selectedChannelIDs,
-                currentPosition: currentAnchorTarget()
-            )
+        let previousItems = viewModel.items
+        let previousTarget = currentAnchorTarget()
+
+        refreshTask = Task { @MainActor in
             async let minimumDelay: () = Task.sleep(for: .milliseconds(800))
-            _ = await (refreshResult, try? minimumDelay)
+            await viewModel.reloadCurrentDay(selectedIDs: appState.selectedChannelIDs)
+
+            if let replacement = replacementScrollTarget(
+                after: viewModel.items,
+                previousItems: previousItems,
+                previousTarget: previousTarget
+            ) {
+                viewModel.initialAnchorID = nil
+                viewportAnchorID = replacement
+                readingAnchorID = replacement
+                lastVisiblePosition = replacement
+                let isAtBottom = replacement == viewModel.items.last?.id
+                viewModel.updateBottomState(isAtBottom, currentPosition: replacement)
+                scrollPosition = ScrollPosition(
+                    id: replacement,
+                    anchor: isAtBottom ? .bottom : .center
+                )
+            } else {
+                setupScrollPosition()
+            }
+
+            _ = await (try? minimumDelay)
             isRefreshing = false
         }
     }
 
-    private func scrollToBottom(using proxy: ScrollViewProxy) {
+    private func completeBottomRefreshIfNeeded() {
+        guard bottomRefreshArmed, !isRefreshing, !isScrollActive else { return }
+        bottomRefreshArmed = false
+        triggerBottomRefresh()
+    }
+
+    private func scrollToBottom() {
+        guard let newest = viewModel.items.last else { return }
+
+        pendingScrollID = nil
+        viewportAnchorID = newest.id
+        readingAnchorID = newest.id
+        lastVisiblePosition = newest.id
+        viewModel.updateBottomState(true, currentPosition: newest.id)
+
         withAnimation {
-            proxy.scrollTo(bottomScrollAnchorID, anchor: .bottom)
+            scrollPosition.scrollTo(id: newest.id, anchor: .bottom)
         }
     }
 

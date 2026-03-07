@@ -53,6 +53,14 @@ private let sharedDateFormatter: DateFormatter = {
     return f
 }()
 
+private let exactTimestampFormatter: DateFormatter = {
+    let f = DateFormatter()
+    f.locale = .current
+    f.timeZone = .current
+    f.dateFormat = "yyyy-MM-dd HH:mm:ss"
+    return f
+}()
+
 func relativeTime(for timestamp: Int) -> String {
     let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
     let interval = Date.now.timeIntervalSince(date)
@@ -63,4 +71,9 @@ func relativeTime(for timestamp: Int) -> String {
     if interval < 604800 { return "\(Int(interval / 86400))d" }
 
     return sharedDateFormatter.string(from: date)
+}
+
+func exactTimestamp(for timestamp: Int) -> String {
+    let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+    return exactTimestampFormatter.string(from: date)
 }

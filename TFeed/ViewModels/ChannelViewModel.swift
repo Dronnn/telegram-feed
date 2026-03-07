@@ -379,8 +379,11 @@ final class ChannelViewModel {
 
         performStableMutation {
             for newItem in uniqueNewItems {
-                let insertionIndex = items.firstIndex(where: { $0 > newItem }) ?? items.endIndex
-                items.insert(newItem, at: insertionIndex)
+                if let mergedItem = mergeIntoExistingAlbumIfNeeded(newItem) {
+                    insertSorted(mergedItem)
+                } else {
+                    insertSorted(newItem)
+                }
             }
         }
     }
@@ -401,7 +404,7 @@ final class ChannelViewModel {
                 ? item
                 : FeedItem(
                     chatId: item.chatId,
-                    messageId: item.messageId,
+                    messageId: unseenRepresentedIDs.max() ?? item.messageId,
                     date: item.date,
                     formattedText: item.formattedText,
                     channelTitle: item.channelTitle,
@@ -448,8 +451,8 @@ final class ChannelViewModel {
 
         return FeedItem(
             chatId: lhs.chatId,
-            messageId: lhs.messageId,
-            date: min(lhs.date, rhs.date),
+            messageId: representedMessageIds.max() ?? lhs.messageId,
+            date: max(lhs.date, rhs.date),
             formattedText: formattedText,
             channelTitle: lhs.channelTitle,
             avatarFileId: lhs.avatarFileId,
@@ -463,6 +466,23 @@ final class ChannelViewModel {
     private func normalizedAlbumID(for message: Message) -> Int64? {
         let albumID = message.mediaAlbumId.rawValue
         return albumID == 0 ? nil : albumID
+    }
+
+    private func mergeIntoExistingAlbumIfNeeded(_ item: FeedItem) -> FeedItem? {
+        guard let albumID = item.mediaAlbumId,
+              let existingIndex = items.lastIndex(where: {
+                  $0.chatId == item.chatId && $0.mediaAlbumId == albumID
+              }) else {
+            return nil
+        }
+
+        let existingItem = items.remove(at: existingIndex)
+        return mergeAlbumItems(existingItem, item)
+    }
+
+    private func insertSorted(_ item: FeedItem) {
+        let insertionIndex = items.firstIndex(where: { $0 > item }) ?? items.endIndex
+        items.insert(item, at: insertionIndex)
     }
 
     private func representedMessageIDs(in items: [FeedItem]) -> Set<FeedItemID> {
